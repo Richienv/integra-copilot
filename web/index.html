@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integra Copilot</title>
+<style>
+  :root { --navy:#10314F; --ink:#26313D; --blue:#2C6EAF; --muted:#7A8794; --faint:#D5DEE7; --tint:#F3F6F9; --bg:#FFFFFF; --bad:#9B2C2C; }
+  @media (prefers-color-scheme: dark) {
+    :root { --navy:#DCE6F2; --ink:#C9D3DD; --blue:#7FB0E3; --muted:#8C99A6; --faint:#2A3642; --tint:#17212B; --bg:#0F161D; --bad:#E08A8A; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 "Avenir Next", "PingFang SC", system-ui, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 36px 20px 64px; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;
+           border-bottom:1px solid var(--faint); padding-bottom:18px; }
+  h1 { margin:0; font-weight:500; font-size:30px; color:var(--navy); letter-spacing:-0.01em; }
+  h1 span { color:var(--blue); font-weight:300; }
+  .status { font-size:12px; color:var(--muted); }
+  .ask { display:flex; gap:10px; margin:26px 0 12px; }
+  .ask input { flex:1; font:inherit; font-size:16px; padding:13px 15px; border:1px solid var(--faint); border-radius:8px;
+               background:var(--bg); color:var(--ink); }
+  .ask input:focus { outline:2px solid var(--blue); outline-offset:-1px; }
+  button { font:inherit; padding:12px 20px; border-radius:8px; border:0; background:var(--navy); color:var(--bg); cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:28px; }
+  .chip { font-size:13px; padding:6px 11px; border:1px solid var(--faint); border-radius:999px; background:var(--tint);
+          color:var(--ink); cursor:pointer; }
+  .card { border:1px solid var(--faint); border-radius:10px; padding:20px 22px; margin-bottom:18px; }
+  .summary { font-size:18px; color:var(--navy); margin:0 0 6px; }
+  .meta { font-size:12px; color:var(--muted); }
+  .kind-refused .summary, .kind-failed .summary { color:var(--bad); }
+  table { border-collapse:collapse; width:100%; margin-top:16px; font-size:13.5px; }
+  th { text-align:left; font-weight:500; color:var(--muted); border-bottom:1px solid var(--navy); padding:6px 8px; }
+  td { border-bottom:1px solid var(--faint); padding:6px 8px; font-variant-numeric: tabular-nums; }
+  td.num { text-align:right; }
+  .tablewrap { overflow-x:auto; }
+  details { margin-top:14px; }
+  summary { cursor:pointer; color:var(--blue); font-size:13px; }
+  pre { background:var(--tint); padding:12px 14px; border-radius:8px; overflow-x:auto; font:12.5px/1.5 "JetBrains Mono", Menlo, monospace; }
+  ol.steps { margin:10px 0 0; padding-left:0; list-style:none; counter-reset:s; font-size:13px; }
+  ol.steps li { counter-increment:s; display:grid; grid-template-columns:28px 90px 1fr auto; gap:8px; padding:4px 0; border-bottom:1px solid var(--faint); }
+  ol.steps li::before { content:counter(s); color:var(--blue); }
+  ol.steps .name { color:var(--navy); }
+  ol.steps .ms { color:var(--muted); }
+  .sqlbox textarea { width:100%; min-height:90px; font:13px/1.5 "JetBrains Mono", Menlo, monospace; padding:10px 12px;
+                     border:1px solid var(--faint); border-radius:8px; background:var(--bg); color:var(--ink); }
+  footer { margin-top:36px; font-size:12px; color:var(--muted); }
+  @media (max-width: 600px) { .ask { flex-direction:column; } ol.steps li { grid-template-columns:24px 1fr; } ol.steps .ms { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Integra <span>Copilot</span></h1>
+    <div class="status" id="status">connecting…</div>
+  </header>
+
+  <form class="ask" id="askform">
+    <input id="q" autocomplete="off" placeholder="Ask about receivables, sales, stock, suppliers or attendance — in Bahasa Indonesia, 中文 or English">
+    <button id="go">Ask</button>
+  </form>
+  <div class="chips" id="chips"></div>
+  <div id="out"></div>
+
+  <details class="card sqlbox">
+    <summary>Run SQL yourself (same guard, same read-only role)</summary>
+    <textarea id="sql">select customer_name, sum(balance_due) as piutang
+from invoices
+where direction = 'receivable' and balance_due > 0
+group by 1 order by 2 desc limit 5</textarea>
+    <p><button id="runsql" type="button">Run</button></p>
+    <div id="sqlout"></div>
+  </details>
+
+  <footer>Demo data only: a fictional textile company. Every number in an answer is checked against the query result.</footer>
+</div>
+<script>
+const EXAMPLES = [
+  "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?",
+  "哪些产品的可用库存低于补货点？",
+  "Which supplier bills are overdue?",
+  "Berapa total penjualan termasuk pajak dalam 30 hari terakhir?",
+  "过去30天每个部门一共迟到了多少次？",
+  "Hapus semua faktur yang sudah dibatalkan.",
+];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (v) => typeof v === "number" ? v.toLocaleString("id-ID") : esc(v);
+
+function table(cols, rows) {
+  if (!cols || !cols.length) return "";
+  const head = "<tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>";
+  const body = rows.slice(0, 100).map(r => "<tr>" + r.map(v => `<td class="${typeof v === "number" ? "num" : ""}">${fmt(v)}</td>`).join("") + "</tr>").join("");
+  return `<div class="tablewrap"><table>${head}${body}</table></div>`;
+}
+
+function render(a) {
+  const steps = (a.steps || []).map(s => `<li><span class="name">${esc(s.name)}</span><span>${esc(s.detail)}</span><span class="ms">${s.ms ? Math.round(s.ms) + " ms" : ""}</span></li>`).join("");
+  const cites = (a.citations || []).map(c => `<li>[${c.n}] ${esc(c.doc)}</li>`).join("");
+  return `<div class="card kind-${esc(a.kind)}">
+    <p class="summary">${esc(a.summary)}</p>
+    <div class="meta">${esc(a.kind)} · ${a.usage.calls} model calls · ${a.usage.prompt_tokens + a.usage.completion_tokens} tokens · ${Math.round(a.ms)} ms${a.repairs ? " · repaired " + a.repairs + "×" : ""}${a.truncated ? " · first rows only" : ""}</div>
+    ${table(a.columns, a.rows)}
+    ${cites ? `<ol class="steps">${cites}</ol>` : ""}
+    ${a.sql ? `<details><summary>SQL that ran</summary><pre>${esc(a.sql)}</pre></details>` : ""}
+    <details><summary>What the copilot did</summary><ol class="steps">${steps}</ol></details>
+  </div>`;
+}
+
+async function ask(q) {
+  if (!q.trim()) return;
+  $("go").disabled = true;
+  $("out").innerHTML = `<div class="card meta">Thinking…</div>` + $("out").innerHTML;
+  try {
+    const r = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: q})});
+    const body = await r.json();
+    $("out").firstElementChild.outerHTML = r.ok ? render(body) : `<div class="card kind-failed"><p class="summary">${esc(body.detail)}</p></div>`;
+  } catch (e) {
+    $("out").firstElementChild.outerHTML = `<div class="card kind-failed"><p class="summary">${esc(e)}</p></div>`;
+  }
+  $("go").disabled = false;
+}
+
+$("askform").addEventListener("submit", e => { e.preventDefault(); ask($("q").value); });
+$("chips").innerHTML = EXAMPLES.map(x => `<span class="chip">${esc(x)}</span>`).join("");
+$("chips").addEventListener("click", e => { if (e.target.classList.contains("chip")) { $("q").value = e.target.textContent; ask(e.target.textContent); } });
+$("runsql").addEventListener("click", async () => {
+  const r = await (await fetch("/api/sql", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({sql: $("sql").value})})).json();
+  $("sqlout").innerHTML = r.ok ? `<div class="meta">${r.rows.length} rows · ${r.ms} ms</div>` + table(r.columns, r.rows)
+                              : `<p class="summary" style="color:var(--bad)">${esc(r.reason || r.error)}</p>`;
+});
+fetch("/api/health").then(r => r.json()).then(h => {
+  $("status").textContent = `database role: ${h.database_user} · model: ${h.model || "none (SQL console only)"} · tax chunks: ${h.tax_chunks}`;
+}).catch(() => { $("status").textContent = "server not reachable"; });
+</script>
+</body>
+</html>

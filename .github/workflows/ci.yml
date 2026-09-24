@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Tests (no model needed)
+        run: python -m pytest -q
+      - name: Evaluation harness with the reference answers (must be 100%)
+        run: |
+          python -m copilot eval --oracle | tee oracle.log
+          grep -q '"relaxed_ex": 100.0' oracle.log
+          grep -q '"refusal_accuracy": 100.0' oracle.log

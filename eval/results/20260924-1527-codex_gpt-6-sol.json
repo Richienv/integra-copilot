@@ -1,0 +1,1146 @@
+{
+  "metrics": {
+    "model": "codex/gpt-6-sol",
+    "date": "2026-09-24",
+    "questions": 50,
+    "strict_ex": 63.4,
+    "relaxed_ex": 95.1,
+    "refusal_accuracy": 100.0,
+    "false_refusals": 0,
+    "errors": 0,
+    "schema_recall": 100.0,
+    "repaired_answers": 0,
+    "summaries_replaced": 0,
+    "latency_p50_ms": 67934,
+    "latency_p95_ms": 87570,
+    "tokens_per_question": 1421,
+    "total_cost": 0.0,
+    "note": "Model: gpt-6-sol through the Codex CLI signed in with ChatGPT (reasoning effort low). Token counts are estimates of the Copilot's own prompts; Codex adds about 21,000 tokens of its own instructions to every call. Cost is zero because calls are billed to the ChatGPT plan.",
+    "relaxed_ex_by_language": {
+      "en": 92.9,
+      "id": 100.0,
+      "zh": 90.0
+    }
+  },
+  "results": [
+    {
+      "id": "ar-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(balance_due), 0) AS total_piutang_belum_dibayar_idr FROM copilot.invoices WHERE direction = 'receivable' AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') AND balance_due > 0 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 64241.4,
+      "tokens": 1557,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "gl_accounts",
+        "payments",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-02",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(balance_due) AS total_piutang_belum_dibayar FROM copilot.invoices WHERE direction = 'receivable' AND balance_due > 0 AND NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') GROUP BY customer_id, customer_name ORDER BY total_piutang_belum_dibayar DESC LIMIT 5",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 67517.4,
+      "tokens": 1654,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "suppliers",
+        "customers",
+        "gl_accounts"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-03",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT number, balance_due FROM copilot.invoices WHERE direction = 'receivable' AND due_date >= CURRENT_DATE AND due_date < CURRENT_DATE + 7 AND balance_due > 0 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') ORDER BY due_date, number LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 53731.0,
+      "tokens": 1289,
+      "cost": 0.0,
+      "views": [
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ap-01",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(balance_due), 0) AS total_supplier_payables_idr FROM copilot.invoices WHERE direction = 'payable' AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') AND balance_due > 0 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 51272.6,
+      "tokens": 1670,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "invoices",
+        "sales_order_items",
+        "purchase_orders",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ap-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT number AS bill_number, supplier_name, CURRENT_DATE - due_date AS days_overdue FROM copilot.invoices WHERE direction = 'payable' AND due_date < CURRENT_DATE AND balance_due > 0 AND NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') ORDER BY days_overdue DESC, bill_number LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 63691.2,
+      "tokens": 1702,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "purchase_orders"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-04",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(balance_due), 0) AS overdue_receivables_idr FROM copilot.invoices WHERE direction = 'receivable' AND due_date < CURRENT_DATE AND balance_due > 0 AND NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 65522.1,
+      "tokens": 1338,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "payments"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-05",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(balance_due) AS overdue_receivables_idr FROM copilot.invoices WHERE direction = 'receivable' AND due_date < CURRENT_DATE AND balance_due > 0 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') GROUP BY customer_id, customer_name ORDER BY overdue_receivables_idr DESC LIMIT 1",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 71718.5,
+      "tokens": 1353,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "customers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-06",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) AS overdue_sales_invoice_count FROM copilot.invoices WHERE direction = 'receivable' AND status = 'OVERDUE' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 58070.9,
+      "tokens": 1532,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "purchase_orders",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-07",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT AVG(due_date - issue_date) AS average_days_to_due FROM copilot.invoices WHERE direction = 'receivable' AND NOT status IN ('DRAFT', 'CANCELLED', 'REJECTED', 'VOID') AND issue_date IS NOT NULL AND due_date IS NOT NULL LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 69481.1,
+      "tokens": 1579,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "sales_orders",
+        "payments",
+        "employees"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "pay-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(amount), 0) AS total_pembayaran_diterima_idr FROM copilot.payments WHERE direction = 'received' AND payment_date >= CURRENT_DATE - 30 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 68921.4,
+      "tokens": 1636,
+      "cost": 0.0,
+      "views": [
+        "payments",
+        "customers",
+        "sales_order_items",
+        "sales_orders",
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "pay-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT method, COUNT(*) AS payment_count, SUM(amount) AS total_received_idr FROM copilot.payments WHERE direction = 'received' GROUP BY method ORDER BY total_received_idr DESC LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 73512.9,
+      "tokens": 1415,
+      "cost": 0.0,
+      "views": [
+        "payments",
+        "invoices"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "pay-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(amount), 0) AS total_paid_to_suppliers_idr FROM copilot.payments WHERE direction = 'paid' AND payment_date >= CURRENT_DATE - 60 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 79291.1,
+      "tokens": 1472,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "payments",
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "so-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(total), 0) AS total_penjualan_termasuk_pajak FROM copilot.sales_orders WHERE order_date >= CURRENT_DATE - 30 AND NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 66559.0,
+      "tokens": 1644,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "employees",
+        "sales_order_items",
+        "stock",
+        "products"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT TO_CHAR(month_start, 'YYYY-MM') AS month, COALESCE(SUM(so.total), 0) AS total_sales_idr FROM GENERATE_SERIES(DATE_TRUNC('MONTH', CURRENT_DATE) - INTERVAL '5 MONTHS', DATE_TRUNC('MONTH', CURRENT_DATE), INTERVAL '1 MONTH') AS months(month_start) LEFT JOIN copilot.sales_orders AS so ON so.order_date >= month_start AND so.order_date < month_start + INTERVAL '1 MONTH' AND NOT so.status IN ('DRAFT', 'CANCELLED') GROUP BY month_start ORDER BY month_start LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 78313.5,
+      "tokens": 1392,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": false,
+      "relaxed": false,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(total) AS sales_amount_idr FROM copilot.sales_orders WHERE NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') GROUP BY customer_id, customer_name ORDER BY sales_amount_idr DESC LIMIT 3",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 69741.2,
+      "tokens": 1376,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "customers",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT i.product_name, SUM(i.line_total) AS sales_before_tax FROM copilot.sales_order_items AS i JOIN copilot.sales_orders AS o ON o.id = i.sales_order_id WHERE o.order_date >= CURRENT_DATE - 90 AND NOT o.status IN ('DRAFT', 'CANCELLED') GROUP BY i.product_id, i.product_name ORDER BY sales_before_tax DESC LIMIT 5",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 61270.2,
+      "tokens": 1624,
+      "cost": 0.0,
+      "views": [
+        "sales_order_items",
+        "products",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_order_items",
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) AS sales_order_count FROM copilot.sales_orders WHERE status IN ('CONFIRMED', 'IN_PROGRESS') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 64746.9,
+      "tokens": 1118,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-06",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT AVG(total) AS rata_rata_nilai_pesanan_idr FROM copilot.sales_orders WHERE order_date >= CAST(DATE_TRUNC('YEAR', CURRENT_DATE) AS DATE) AND order_date < CAST((DATE_TRUNC('YEAR', CURRENT_DATE) + INTERVAL '1 YEAR') AS DATE) AND NOT status IN ('DRAFT', 'PO_DRAFT', 'CANCELLED', 'REJECTED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 61017.8,
+      "tokens": 1128,
+      "cost": 0.0,
+      "views": [
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-07",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT p.category, SUM(soi.line_total) AS sales_before_tax_idr FROM copilot.sales_order_items AS soi JOIN copilot.sales_orders AS so ON soi.sales_order_id = so.id JOIN copilot.products AS p ON soi.product_id = p.id WHERE NOT so.status IN ('DRAFT', 'CANCELLED', 'REJECTED', 'VOID') GROUP BY p.category ORDER BY sales_before_tax_idr DESC LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 72412.2,
+      "tokens": 1462,
+      "cost": 0.0,
+      "views": [
+        "products",
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "products",
+        "sales_order_items",
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-08",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT code, name, last_order_date FROM copilot.customers WHERE is_active = TRUE AND (last_order_date < CURRENT_DATE - 60 OR last_order_date IS NULL) ORDER BY last_order_date NULLS FIRST, name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 89325.2,
+      "tokens": 1694,
+      "cost": 0.0,
+      "views": [
+        "employees",
+        "customers",
+        "products",
+        "inventory_moves"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "cu-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT code, name, credit_status FROM copilot.customers WHERE credit_status IN ('HOLD', 'WATCH') ORDER BY credit_status, name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 87569.8,
+      "tokens": 1318,
+      "cost": 0.0,
+      "views": [
+        "customers"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "cu-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT c.code, c.name, c.credit_limit, SUM(i.balance_due) AS unpaid_invoices FROM copilot.customers AS c JOIN copilot.invoices AS i ON i.customer_id = c.id WHERE i.direction = 'receivable' AND NOT i.status IN ('DRAFT', 'CANCELLED', 'VOID') AND i.balance_due > 0 AND c.credit_limit > 0 GROUP BY c.id, c.code, c.name, c.credit_limit HAVING SUM(i.balance_due) > c.credit_limit / 2 ORDER BY unpaid_invoices DESC LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 72939.6,
+      "tokens": 1734,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "invoices",
+        "payments",
+        "warehouses"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers",
+        "invoices"
+      ]
+    },
+    {
+      "id": "cu-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) AS active_government_customers FROM copilot.customers WHERE is_active = TRUE AND customer_type = 'GOVERNMENT' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 62151.3,
+      "tokens": 1079,
+      "cost": 0.0,
+      "views": [
+        "customers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "po-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT code, name, on_time_rate_pct FROM copilot.suppliers WHERE on_time_rate_pct < 85 ORDER BY on_time_rate_pct ASC, name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 66893.1,
+      "tokens": 1192,
+      "cost": 0.0,
+      "views": [
+        "suppliers"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "suppliers"
+      ]
+    },
+    {
+      "id": "po-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) AS purchase_orders_waiting_for_delivery FROM copilot.purchase_orders WHERE status IN ('ORDERED', 'VENDOR_CONFIRMED', 'SHIPPED') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 55802.1,
+      "tokens": 1524,
+      "cost": 0.0,
+      "views": [
+        "purchase_orders",
+        "suppliers",
+        "purchase_order_items",
+        "inventory_moves"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT supplier_name, SUM(net_amount) AS total_purchases_idr FROM copilot.purchase_orders WHERE order_date >= CURRENT_DATE - 90 AND NOT status IN ('PO_DRAFT', 'CANCELLED', 'REJECTED') GROUP BY supplier_name ORDER BY total_purchases_idr DESC LIMIT 1",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 56663.1,
+      "tokens": 1449,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "purchase_orders",
+        "purchase_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT CAST(DATE_TRUNC('MONTH', order_date) AS DATE) AS bulan, SUM(amount_before_tax) AS total_pembelian_sebelum_pajak FROM copilot.purchase_orders WHERE order_date >= DATE_TRUNC('MONTH', CURRENT_DATE) - INTERVAL '2 MONTHS' AND order_date < DATE_TRUNC('MONTH', CURRENT_DATE) + INTERVAL '1 MONTH' AND NOT status IN ('PO_DRAFT', 'CANCELLED', 'REJECTED') GROUP BY 1 ORDER BY 1 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 56621.6,
+      "tokens": 1660,
+      "cost": 0.0,
+      "views": [
+        "purchase_order_items",
+        "employees",
+        "sales_order_items",
+        "purchase_orders",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT po.number AS po_number, poi.product_name, poi.quantity, poi.received_qty FROM copilot.purchase_order_items AS poi JOIN copilot.purchase_orders AS po ON po.id = poi.purchase_order_id WHERE NOT po.status IN ('PO_DRAFT', 'CANCELLED', 'REJECTED') AND poi.received_qty > 0 AND poi.received_qty < poi.quantity ORDER BY po.number, poi.product_name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 94378.8,
+      "tokens": 1659,
+      "cost": 0.0,
+      "views": [
+        "purchase_order_items",
+        "purchase_orders",
+        "sales_order_items",
+        "customers",
+        "sales_orders"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_order_items",
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "st-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT product_code, product_name, SUM(available_qty) AS total_available_qty, MAX(reorder_level) AS reorder_level FROM copilot.stock GROUP BY product_id, product_code, product_name HAVING SUM(available_qty) < MAX(reorder_level) ORDER BY total_available_qty ASC, product_name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 86543.5,
+      "tokens": 1680,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "sales_order_items",
+        "products",
+        "sales_orders"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-02",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT warehouse_name, SUM(quantity) AS total_quantity FROM copilot.stock WHERE warehouse_name = 'Gudang Barang Jadi Jakarta' GROUP BY warehouse_name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 96756.2,
+      "tokens": 1874,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "sales_order_items",
+        "purchase_order_items",
+        "inventory_moves",
+        "products",
+        "sales_orders",
+        "purchase_orders"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-03",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(s.quantity * p.cost_price), 0) AS total_stock_value_idr FROM copilot.stock AS s JOIN copilot.products AS p ON p.id = s.product_id LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 82219.9,
+      "tokens": 1624,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "products",
+        "sales_order_items",
+        "customers",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "products",
+        "stock"
+      ]
+    },
+    {
+      "id": "st-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT product_name, unit, SUM(available_qty) AS total_available FROM copilot.stock WHERE product_name ILIKE '%Katun Combed 30s%' AND unit = 'meter' GROUP BY product_name, unit ORDER BY product_name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 74470.1,
+      "tokens": 1573,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "warehouses",
+        "employees",
+        "products"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT p.code, p.name, p.unit, SUM(-im.quantity) AS units_shipped FROM copilot.inventory_moves AS im JOIN copilot.products AS p ON p.id = im.product_id WHERE p.category = 'Pakaian Jadi' AND im.move_type = 'SO_SHIPMENT' AND im.move_date >= CURRENT_DATE - 30 GROUP BY p.code, p.name, p.unit ORDER BY units_shipped DESC, p.name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 70212.1,
+      "tokens": 1811,
+      "cost": 0.0,
+      "views": [
+        "inventory_moves",
+        "products",
+        "customers",
+        "purchase_orders"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "inventory_moves",
+        "products"
+      ]
+    },
+    {
+      "id": "gl-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT code, name, balance FROM copilot.gl_accounts WHERE account_type = 'ASSET' AND (name ILIKE '%kas%' OR name ILIKE '%bank%') ORDER BY code LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 69253.4,
+      "tokens": 1043,
+      "cost": 0.0,
+      "views": [
+        "gl_accounts"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "gl_accounts"
+      ]
+    },
+    {
+      "id": "gl-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(debit - credit), 0) AS total_electricity_expense_idr FROM copilot.journal_lines WHERE entry_status = 'POSTED' AND account_type = 'EXPENSE' AND entry_date >= CURRENT_DATE - 90 AND (account_name ILIKE '%listrik%' OR account_name ILIKE '%electricity%') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 68351.2,
+      "tokens": 1372,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "gl-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(CASE WHEN account_type = 'REVENUE' THEN credit - debit ELSE 0 END), 0) AS total_revenue_idr, COALESCE(SUM(CASE WHEN account_type = 'EXPENSE' THEN debit - credit ELSE 0 END), 0) AS total_expenses_idr FROM copilot.journal_lines WHERE entry_status = 'POSTED' AND entry_date >= CAST(DATE_TRUNC('MONTH', CURRENT_DATE) AS DATE) AND entry_date < CAST((DATE_TRUNC('MONTH', CURRENT_DATE) + INTERVAL '1 MONTH') AS DATE) AND account_type IN ('REVENUE', 'EXPENSE') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 70386.6,
+      "tokens": 1531,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "sales_orders",
+        "products"
+      ],
+      "strict": false,
+      "relaxed": false,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "gl-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COALESCE(SUM(CASE WHEN account_type = 'REVENUE' THEN credit - debit WHEN account_type = 'EXPENSE' AND (account_name ILIKE '%harga pokok penjualan%' OR account_name ILIKE '%beban pokok penjualan%' OR account_name ILIKE '%HPP%') THEN credit - debit ELSE 0 END), 0) AS laba_kotor_idr FROM copilot.journal_lines WHERE entry_status = 'POSTED' AND entry_date >= CURRENT_DATE - 90 AND (account_type = 'REVENUE' OR (account_type = 'EXPENSE' AND (account_name ILIKE '%harga pokok penjualan%' OR account_name ILIKE '%beban pokok penjualan%' OR account_name ILIKE '%HPP%'))) LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 73270.2,
+      "tokens": 1568,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "hr-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, COUNT(*) AS jumlah_karyawan_aktif FROM copilot.employees WHERE status = 'ACTIVE' GROUP BY department ORDER BY department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 71112.3,
+      "tokens": 1298,
+      "cost": 0.0,
+      "views": [
+        "employees",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "employees"
+      ]
+    },
+    {
+      "id": "hr-02",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, COUNT(*) AS late_count FROM copilot.attendance WHERE attendance_date >= CURRENT_DATE - 30 AND is_late = TRUE GROUP BY department ORDER BY late_count DESC, department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 70949.2,
+      "tokens": 1248,
+      "cost": 0.0,
+      "views": [
+        "employees",
+        "attendance"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "hr-03",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, ROUND(CAST(100.0 * COUNT(*) FILTER(WHERE status = 'PRESENT') / NULLIF(COUNT(*), 0) AS DECIMAL), 2) AS attendance_rate_pct FROM copilot.attendance WHERE attendance_date >= CURRENT_DATE - 30 GROUP BY department ORDER BY department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 69249.2,
+      "tokens": 1459,
+      "cost": 0.0,
+      "views": [
+        "attendance",
+        "employees",
+        "suppliers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "hr-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT DISTINCT employee_name, department FROM copilot.attendance WHERE status IN ('SICK', 'LEAVE') AND attendance_date >= CURRENT_DATE - 7 ORDER BY employee_name, department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 86688.7,
+      "tokens": 1327,
+      "cost": 0.0,
+      "views": [
+        "attendance",
+        "employees"
+      ],
+      "strict": false,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "no-01",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 49199.7,
+      "tokens": 948,
+      "cost": 0.0,
+      "views": [
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-02",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 40660.3,
+      "tokens": 1286,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "payments",
+        "purchase_orders"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-03",
+      "lang": "zh",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 34251.4,
+      "tokens": 890,
+      "cost": 0.0,
+      "views": [
+        "employees"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-04",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 39837.6,
+      "tokens": 993,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "employees"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-05",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 37766.1,
+      "tokens": 1110,
+      "cost": 0.0,
+      "views": [
+        "payments",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-06",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 35519.1,
+      "tokens": 1419,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "payments",
+        "sales_orders",
+        "sales_order_items",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-07",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 28899.7,
+      "tokens": 1370,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "sales_orders",
+        "customers",
+        "products"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-08",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 26946.1,
+      "tokens": 1443,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "purchase_orders",
+        "payments",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-09",
+      "lang": "zh",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 26822.1,
+      "tokens": 923,
+      "cost": 0.0,
+      "views": [
+        "suppliers"
+      ],
+      "refused": true
+    }
+  ]
+}

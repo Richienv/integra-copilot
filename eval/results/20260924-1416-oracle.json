@@ -1,0 +1,1145 @@
+{
+  "metrics": {
+    "model": "oracle",
+    "date": "2026-09-24",
+    "questions": 50,
+    "strict_ex": 100.0,
+    "relaxed_ex": 100.0,
+    "refusal_accuracy": 100.0,
+    "false_refusals": 0,
+    "schema_recall": 100.0,
+    "repaired_answers": 0,
+    "summaries_replaced": 0,
+    "latency_p50_ms": 1,
+    "latency_p95_ms": 2,
+    "tokens_per_question": 1028,
+    "total_cost": 0.0,
+    "relaxed_ex_by_language": {
+      "en": 100.0,
+      "id": 100.0,
+      "zh": 100.0
+    }
+  },
+  "results": [
+    {
+      "id": "ar-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(balance_due) FROM invoices WHERE direction = 'receivable' AND balance_due > 0 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 9.1,
+      "tokens": 1208,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "gl_accounts",
+        "payments",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-02",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(balance_due) AS piutang FROM invoices WHERE direction = 'receivable' AND balance_due > 0 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') GROUP BY customer_name ORDER BY piutang DESC LIMIT 5",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.0,
+      "tokens": 1206,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "suppliers",
+        "customers",
+        "gl_accounts"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-03",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT number, balance_due FROM invoices WHERE direction = 'receivable' AND balance_due > 0 AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 958,
+      "cost": 0.0,
+      "views": [
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ap-01",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(balance_due) FROM invoices WHERE direction = 'payable' AND balance_due > 0 AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.7,
+      "tokens": 1255,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "invoices",
+        "sales_order_items",
+        "purchase_orders",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ap-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT number, CURRENT_DATE - due_date AS days_overdue FROM invoices WHERE direction = 'payable' AND balance_due > 0 AND due_date < CURRENT_DATE AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1110,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "purchase_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-04",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(balance_due) FROM invoices WHERE direction = 'receivable' AND balance_due > 0 AND due_date < CURRENT_DATE AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.9,
+      "tokens": 964,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "payments"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-05",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(balance_due) AS overdue FROM invoices WHERE direction = 'receivable' AND balance_due > 0 AND due_date < CURRENT_DATE AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') GROUP BY customer_name ORDER BY overdue DESC LIMIT 1",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1020,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "customers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-06",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) FROM invoices WHERE direction = 'receivable' AND status = 'OVERDUE' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.6,
+      "tokens": 1160,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "purchase_orders",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "ar-07",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT AVG(due_date - issue_date) FROM invoices WHERE direction = 'receivable' AND NOT status IN ('DRAFT', 'CANCELLED', 'VOID') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.0,
+      "tokens": 1176,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "sales_orders",
+        "payments",
+        "employees"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "pay-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(amount) FROM payments WHERE direction = 'received' AND payment_date >= CURRENT_DATE - 30 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1283,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "payments",
+        "sales_order_items",
+        "sales_orders",
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "pay-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT method, SUM(amount) FROM payments WHERE direction = 'received' GROUP BY method LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.6,
+      "tokens": 1114,
+      "cost": 0.0,
+      "views": [
+        "payments",
+        "customers",
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "pay-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(amount) FROM payments WHERE direction = 'paid' AND payment_date >= CURRENT_DATE - 60 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1030,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "payments",
+        "invoices"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "payments"
+      ]
+    },
+    {
+      "id": "so-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(total) FROM sales_orders WHERE NOT status IN ('DRAFT', 'CANCELLED') AND order_date >= CURRENT_DATE - 30 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1178,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "employees",
+        "sales_order_items",
+        "stock",
+        "products"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT CAST(DATE_TRUNC('MONTH', order_date) AS DATE) AS month, SUM(total) FROM sales_orders WHERE NOT status IN ('DRAFT', 'CANCELLED') AND order_date >= DATE_TRUNC('MONTH', CURRENT_DATE) - INTERVAL '5 MONTHS' GROUP BY 1 ORDER BY 1 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.3,
+      "tokens": 951,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT customer_name, SUM(total) AS sales FROM sales_orders WHERE NOT status IN ('DRAFT', 'CANCELLED') GROUP BY customer_name ORDER BY sales DESC LIMIT 3",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.6,
+      "tokens": 1011,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "customers",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT i.product_name, SUM(i.line_total) AS nilai FROM sales_order_items AS i JOIN sales_orders AS o ON o.id = i.sales_order_id WHERE NOT o.status IN ('DRAFT', 'CANCELLED') AND o.order_date >= CURRENT_DATE - 90 GROUP BY i.product_name ORDER BY nilai DESC LIMIT 5",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.2,
+      "tokens": 1159,
+      "cost": 0.0,
+      "views": [
+        "sales_order_items",
+        "products",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_order_items",
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) FROM sales_orders WHERE status IN ('CONFIRMED', 'IN_PROGRESS') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 853,
+      "cost": 0.0,
+      "views": [
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-06",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT AVG(total) FROM sales_orders WHERE NOT status IN ('DRAFT', 'CANCELLED') AND EXTRACT(YEAR FROM order_date) = EXTRACT(YEAR FROM CURRENT_DATE) LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.7,
+      "tokens": 803,
+      "cost": 0.0,
+      "views": [
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-07",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT p.category, SUM(i.line_total) FROM sales_order_items AS i JOIN sales_orders AS o ON o.id = i.sales_order_id JOIN products AS p ON p.id = i.product_id WHERE NOT o.status IN ('DRAFT', 'CANCELLED') GROUP BY p.category LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.6,
+      "tokens": 1009,
+      "cost": 0.0,
+      "views": [
+        "products",
+        "sales_orders",
+        "sales_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "products",
+        "sales_order_items",
+        "sales_orders"
+      ]
+    },
+    {
+      "id": "so-08",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT name FROM customers WHERE is_active AND (last_order_date IS NULL OR last_order_date < CURRENT_DATE - 60) LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 1154,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "employees",
+        "products",
+        "inventory_moves"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "cu-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT name, credit_status FROM customers WHERE credit_status IN ('HOLD', 'WATCH') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 893,
+      "cost": 0.0,
+      "views": [
+        "customers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "cu-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT c.name FROM customers AS c JOIN invoices AS i ON i.customer_id = c.id WHERE i.direction = 'receivable' AND i.balance_due > 0 AND NOT i.status IN ('DRAFT', 'CANCELLED', 'VOID') AND c.credit_limit > 0 GROUP BY c.name, c.credit_limit HAVING SUM(i.balance_due) > 0.5 * c.credit_limit LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.0,
+      "tokens": 1216,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "invoices",
+        "payments",
+        "warehouses"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers",
+        "invoices"
+      ]
+    },
+    {
+      "id": "cu-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) FROM customers WHERE is_active AND customer_type = 'GOVERNMENT' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 778,
+      "cost": 0.0,
+      "views": [
+        "customers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "customers"
+      ]
+    },
+    {
+      "id": "po-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT name, on_time_rate_pct FROM suppliers WHERE on_time_rate_pct < 85 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 791,
+      "cost": 0.0,
+      "views": [
+        "suppliers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "suppliers"
+      ]
+    },
+    {
+      "id": "po-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT COUNT(*) FROM purchase_orders WHERE status IN ('ORDERED', 'VENDOR_CONFIRMED', 'SHIPPED') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.7,
+      "tokens": 1098,
+      "cost": 0.0,
+      "views": [
+        "purchase_orders",
+        "suppliers",
+        "purchase_order_items",
+        "inventory_moves"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT supplier_name, SUM(net_amount) AS spent FROM purchase_orders WHERE NOT status IN ('PO_DRAFT', 'CANCELLED', 'REJECTED') AND order_date >= CURRENT_DATE - 90 GROUP BY supplier_name ORDER BY spent DESC LIMIT 1",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 995,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "purchase_orders",
+        "purchase_order_items"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT CAST(DATE_TRUNC('MONTH', order_date) AS DATE) AS bulan, SUM(amount_before_tax) FROM purchase_orders WHERE NOT status IN ('PO_DRAFT', 'CANCELLED', 'REJECTED') AND order_date >= DATE_TRUNC('MONTH', CURRENT_DATE) - INTERVAL '2 MONTHS' GROUP BY 1 ORDER BY 1 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.9,
+      "tokens": 1224,
+      "cost": 0.0,
+      "views": [
+        "purchase_order_items",
+        "employees",
+        "sales_order_items",
+        "purchase_orders",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "po-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT o.number, i.product_name FROM purchase_order_items AS i JOIN purchase_orders AS o ON o.id = i.purchase_order_id WHERE i.received_qty > 0 AND i.received_qty < i.quantity LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.4,
+      "tokens": 1253,
+      "cost": 0.0,
+      "views": [
+        "purchase_order_items",
+        "purchase_orders",
+        "sales_order_items",
+        "inventory_moves",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "purchase_order_items",
+        "purchase_orders"
+      ]
+    },
+    {
+      "id": "st-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT product_name FROM stock GROUP BY product_name, reorder_level HAVING SUM(available_qty) < reorder_level LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.9,
+      "tokens": 1136,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "sales_order_items",
+        "products",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-02",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(quantity) FROM stock WHERE warehouse_name = 'Gudang Barang Jadi Jakarta' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.6,
+      "tokens": 1366,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "sales_order_items",
+        "purchase_order_items",
+        "inventory_moves",
+        "products",
+        "sales_orders",
+        "purchase_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-03",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(s.quantity * p.cost_price) FROM stock AS s JOIN products AS p ON p.id = s.product_id LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1210,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "products",
+        "sales_order_items",
+        "customers",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "products",
+        "stock"
+      ]
+    },
+    {
+      "id": "st-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(available_qty) FROM stock WHERE product_name = 'Katun Combed 30s' LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 1044,
+      "cost": 0.0,
+      "views": [
+        "stock",
+        "warehouses",
+        "employees",
+        "products"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "stock"
+      ]
+    },
+    {
+      "id": "st-05",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT m.product_name, -SUM(m.quantity) AS shipped FROM inventory_moves AS m JOIN products AS p ON p.id = m.product_id WHERE m.move_type = 'SO_SHIPMENT' AND p.category = 'Pakaian Jadi' AND m.move_date >= CURRENT_DATE - 30 GROUP BY m.product_name LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.2,
+      "tokens": 1257,
+      "cost": 0.0,
+      "views": [
+        "inventory_moves",
+        "products",
+        "customers",
+        "purchase_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "inventory_moves",
+        "products"
+      ]
+    },
+    {
+      "id": "gl-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT name, balance FROM gl_accounts WHERE code IN ('1010', '1020') LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 736,
+      "cost": 0.0,
+      "views": [
+        "gl_accounts"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "gl_accounts"
+      ]
+    },
+    {
+      "id": "gl-02",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(debit - credit) FROM journal_lines WHERE account_name = 'Beban Listrik' AND entry_date >= CURRENT_DATE - 90 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.5,
+      "tokens": 1028,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "gl-03",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT account_type, SUM(CASE WHEN account_type = 'REVENUE' THEN credit - debit ELSE debit - credit END) FROM journal_lines WHERE account_type IN ('REVENUE', 'EXPENSE') AND DATE_TRUNC('MONTH', entry_date) = DATE_TRUNC('MONTH', CURRENT_DATE) GROUP BY account_type LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 1.1,
+      "tokens": 1089,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "sales_orders",
+        "products"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "gl-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT SUM(CASE WHEN account_name = 'Penjualan' THEN credit - debit ELSE -(debit - credit) END) FROM journal_lines WHERE account_name IN ('Penjualan', 'Harga Pokok Penjualan') AND entry_date >= CURRENT_DATE - 90 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.8,
+      "tokens": 1065,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "gl_accounts",
+        "employees",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "journal_lines"
+      ]
+    },
+    {
+      "id": "hr-01",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, COUNT(*) FROM employees WHERE status = 'ACTIVE' GROUP BY department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.5,
+      "tokens": 962,
+      "cost": 0.0,
+      "views": [
+        "employees",
+        "sales_order_items",
+        "sales_orders"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "employees"
+      ]
+    },
+    {
+      "id": "hr-02",
+      "lang": "zh",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, COUNT(*) FROM attendance WHERE is_late AND attendance_date >= CURRENT_DATE - 30 GROUP BY department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.9,
+      "tokens": 858,
+      "cost": 0.0,
+      "views": [
+        "employees",
+        "attendance"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "hr-03",
+      "lang": "en",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT department, ROUND(CAST(100.0 * AVG(CASE WHEN status = 'PRESENT' THEN 1 ELSE 0 END) AS DECIMAL), 1) FROM attendance WHERE attendance_date >= CURRENT_DATE - 30 GROUP BY department LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 2.0,
+      "tokens": 1000,
+      "cost": 0.0,
+      "views": [
+        "attendance",
+        "employees",
+        "suppliers"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "hr-04",
+      "lang": "id",
+      "expect": "sql",
+      "kind": "data",
+      "sql": "SELECT DISTINCT employee_name FROM attendance WHERE status IN ('SICK', 'LEAVE') AND attendance_date >= CURRENT_DATE - 7 LIMIT 200",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.6,
+      "tokens": 894,
+      "cost": 0.0,
+      "views": [
+        "attendance",
+        "employees"
+      ],
+      "strict": true,
+      "relaxed": true,
+      "schema_recall": true,
+      "gold_views": [
+        "attendance"
+      ]
+    },
+    {
+      "id": "no-01",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 747,
+      "cost": 0.0,
+      "views": [
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-02",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 978,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "payments",
+        "purchase_orders"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-03",
+      "lang": "zh",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 644,
+      "cost": 0.0,
+      "views": [
+        "employees"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-04",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.0,
+      "tokens": 755,
+      "cost": 0.0,
+      "views": [
+        "journal_lines",
+        "employees"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-05",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 856,
+      "cost": 0.0,
+      "views": [
+        "payments",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-06",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 1154,
+      "cost": 0.0,
+      "views": [
+        "customers",
+        "payments",
+        "sales_orders",
+        "sales_order_items",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-07",
+      "lang": "id",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.0,
+      "tokens": 1080,
+      "cost": 0.0,
+      "views": [
+        "invoices",
+        "sales_orders",
+        "customers",
+        "products"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-08",
+      "lang": "en",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.0,
+      "tokens": 1061,
+      "cost": 0.0,
+      "views": [
+        "suppliers",
+        "purchase_orders",
+        "payments",
+        "invoices"
+      ],
+      "refused": true
+    },
+    {
+      "id": "no-09",
+      "lang": "zh",
+      "expect": "refuse",
+      "kind": "refused",
+      "sql": "",
+      "repairs": 0,
+      "grounded": true,
+      "ms": 0.1,
+      "tokens": 641,
+      "cost": 0.0,
+      "views": [
+        "suppliers"
+      ],
+      "refused": true
+    }
+  ]
+}

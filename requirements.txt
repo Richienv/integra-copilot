@@ -1,0 +1,12 @@
+# Tested on Python 3.12, 24 September 2026.
+fastapi==0.141.1
+httpx==0.28.1
+mcp==2.2.0
+openai==3.19.2
+pgserver==0.1.4          # a private PostgreSQL 16 for the local demo; not needed against a real database
+psycopg[binary]==3.3.6
+pydantic==2.13.5
+pytest==9.1.1
+rank-bm25==0.2.2
+sqlglot==30.19.0
+uvicorn==0.53.0
