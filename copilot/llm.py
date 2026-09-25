@@ -8,6 +8,7 @@
     export LLM_API_KEY=sk-...
     export LLM_MODEL=qwen-plus
     export LLM_PRICE_IN=0.8  LLM_PRICE_OUT=2   # optional: price per million tokens, for cost reports
+    export LLM_EXTRA_BODY='{"chat_template_kwargs": {"enable_thinking": false}}'   # optional: extra request fields
 
     export LLM_BACKEND=codex  CODEX_MODEL=gpt-6-sol   # or: no key set and the ChatGPT app installed
 """
@@ -34,6 +35,10 @@ class Usage:
 
 
 class ChatModel:
+    """LLM_EXTRA_BODY, a JSON object, is sent as extra fields of every request: a local mlx_lm.server running
+    Qwen3, for example, takes {"chat_template_kwargs": {"enable_thinking": false}} to turn thinking off."""
+    backend = "api"
+
     def __init__(self, base_url=None, api_key=None, model=None):
         from openai import OpenAI
         self.model = model or os.environ["LLM_MODEL"]
@@ -41,9 +46,14 @@ class ChatModel:
                              api_key=api_key or os.environ["LLM_API_KEY"])
         self.price_in = float(os.environ.get("LLM_PRICE_IN", 0))
         self.price_out = float(os.environ.get("LLM_PRICE_OUT", 0))
+        self.extra_body = json.loads(os.environ["LLM_EXTRA_BODY"]) if os.environ.get("LLM_EXTRA_BODY") else None
+        if self.extra_body is not None and not isinstance(self.extra_body, dict):
+            raise ValueError("LLM_EXTRA_BODY must be a JSON object.")
 
     def chat(self, messages, json_mode=False, temperature=0.0):
         extra = {"response_format": {"type": "json_object"}} if json_mode else {}
+        if self.extra_body:
+            extra["extra_body"] = self.extra_body
         start = time.perf_counter()
         r = self.client.chat.completions.create(model=self.model, messages=messages,
                                                 temperature=temperature, **extra)
@@ -58,6 +68,7 @@ class ChatModel:
 @dataclass
 class ScriptedModel:
     """Answers with a function of (messages, json_mode). Deterministic; costs nothing."""
+    backend = "scripted"
     fn: object
     model: str = "scripted"
     calls: list = field(default_factory=list)
@@ -112,6 +123,7 @@ class CodexModel:
         CODEX_MODEL   model name, default gpt-6-sol     CODEX_EFFORT   reasoning effort, default low
         CODEX_BIN     another codex binary
     """
+    backend = "codex"
     BINARIES = ("/Applications/ChatGPT.app/Contents/Resources/codex",
                 "/Applications/Codex.app/Contents/Resources/codex")
 

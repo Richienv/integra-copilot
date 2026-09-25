@@ -4,6 +4,7 @@ from copilot.agent import TEMPLATES, Copilot
 from copilot.llm import ScriptedModel
 from copilot.tax import TaxIndex
 
+# GOOD depends on today's date: the tests that run it use the reader pinned to the day the data was seeded at.
 GOOD = ("select customer_name, sum(balance_due) as due from invoices where direction = 'receivable' and balance_due > 0 "
         "and due_date between current_date and current_date + 7 group by 1 order by 2 desc")
 
@@ -23,15 +24,15 @@ def model(plans, summary="first"):
     return ScriptedModel(fn)
 
 
-def test_answers_with_checked_sql(reader):
-    a = Copilot(reader, model([{"kind": "sql", "sql": GOOD, "reason": ""}])).ask("Berapa piutang yang jatuh tempo minggu ini?")
+def test_answers_with_checked_sql(pinned):
+    a = Copilot(pinned, model([{"kind": "sql", "sql": GOOD, "reason": ""}])).ask("Berapa piutang yang jatuh tempo minggu ini?")
     assert a.kind == "data" and a.rows and a.grounded and a.repairs == 0
     assert a.language == "id" and "LIMIT" in a.sql and "invoices" in a.views
 
 
-def test_repairs_a_wrong_column(reader):
+def test_repairs_a_wrong_column(pinned):
     wrong = GOOD.replace("sum(balance_due)", "sum(amount_due)")
-    a = Copilot(reader, model([{"kind": "sql", "sql": wrong, "reason": ""},
+    a = Copilot(pinned, model([{"kind": "sql", "sql": wrong, "reason": ""},
                                {"kind": "sql", "sql": GOOD, "reason": ""}])).ask("Piutang minggu ini?")
     assert a.kind == "data" and a.repairs == 1
     assert any("amount_due" in s["detail"] for s in a.steps)
@@ -54,8 +55,8 @@ def test_model_refusal(reader):
     assert a.kind == "refused" and a.summary == TEMPLATES["refuse"]["zh"]
 
 
-def test_invented_numbers_are_replaced(reader):
-    a = Copilot(reader, model([{"kind": "sql", "sql": GOOD, "reason": ""}], summary="invent")).ask("Receivables due this week?")
+def test_invented_numbers_are_replaced(pinned):
+    a = Copilot(pinned, model([{"kind": "sql", "sql": GOOD, "reason": ""}], summary="invent")).ask("Receivables due this week?")
     assert a.kind == "data" and not a.grounded and a.summary.startswith("The result is in the table")
 
 
@@ -83,14 +84,14 @@ def test_tax_question_cites_its_source(reader, tmp_path):
     assert a.kind == "tax" and a.citations and a.citations[0]["doc"] == "contoh.md"
 
 
-def test_bad_json_gets_one_more_chance(reader):
+def test_bad_json_gets_one_more_chance(pinned):
     replies = iter(["not json at all", json.dumps({"kind": "sql", "sql": GOOD, "reason": ""})])
 
     def fn(messages, json_mode):
         if json_mode:
             return next(replies)
         return "OK."
-    a = Copilot(reader, ScriptedModel(fn)).ask("Receivables due this week?")
+    a = Copilot(pinned, ScriptedModel(fn)).ask("Receivables due this week?")
     assert a.kind == "data"
 
 

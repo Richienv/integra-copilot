@@ -1,5 +1,6 @@
 import json
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,6 +63,33 @@ def test_backend_choice(tmp_path, monkeypatch):
     assert isinstance(llm.from_env(), llm.ChatModel)
     monkeypatch.setenv("LLM_BACKEND", "codex")
     assert isinstance(llm.from_env(), llm.CodexModel)
+
+
+def test_chat_model_sends_llm_extra_body(monkeypatch):
+    """LLM_EXTRA_BODY goes out as extra fields of every request, e.g. to turn thinking off on a local server."""
+    sent = []
+
+    class Completions:
+        def create(self, **kw):
+            sent.append(kw)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))], usage=None)
+
+    def chat_model():
+        m = llm.ChatModel(base_url="http://127.0.0.1:9/v1", api_key="sk-test", model="qwen3-4b")
+        m.client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+        m.chat([{"role": "user", "content": "hi"}], json_mode=True)
+        return m
+    monkeypatch.setenv("LLM_EXTRA_BODY", '{"chat_template_kwargs": {"enable_thinking": false}}')
+    assert chat_model().extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert sent[-1]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert sent[-1]["response_format"] == {"type": "json_object"}
+    monkeypatch.delenv("LLM_EXTRA_BODY")
+    chat_model()
+    assert "extra_body" not in sent[-1]
+    for bad in ("not json", "[1, 2]"):
+        monkeypatch.setenv("LLM_EXTRA_BODY", bad)
+        with pytest.raises(ValueError):
+            llm.ChatModel(base_url="http://127.0.0.1:9/v1", api_key="sk-test", model="qwen3-4b")
 
 
 def test_demo_database_never_starts_from_a_path_with_a_space(tmp_path, monkeypatch):

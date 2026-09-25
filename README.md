@@ -84,7 +84,7 @@ in `~/.cache/integra-copilot/pg` (set `COPILOT_DATA_DIR` to move it; the path mu
 ```bash
 uv venv -p 3.12 .venv && source .venv/bin/activate
 uv pip install -r requirements.txt
-python -m pytest -q                         # 70 tests, no API key needed
+python -m pytest -q                         # 93 tests, no API key needed
 cp .env.example .env                        # add your model API key, then:
 set -a && source .env && set +a
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
@@ -101,13 +101,21 @@ call through the Codex CLI that ships inside the app (`LLM_BACKEND=codex` forces
 
 ```bash
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
-CODEX_MODEL=gpt-6-sol CODEX_EFFORT=low python -m copilot eval --workers 4
+python -m copilot doctor                                  # which Codex, which Codex home, personal instructions or not
+CODEX_HOME=~/.codex-eval codex login                      # once: a separate Codex home, signed in by you
+CODEX_HOME=~/.codex-eval CODEX_MODEL=gpt-6-sol CODEX_EFFORT=low python -m copilot eval --workers 4
 ```
 
 It is slower than an API, about 25 seconds a call, because Codex wraps every call in its own agent
 instructions (about 21,000 tokens). The copilot runs it read-only, in an empty folder, with no saved session.
 Token counts for this backend are estimates of the copilot's own prompts; cost shows zero because calls are
 billed to the ChatGPT plan.
+
+Codex also adds your own instructions to every call: the `AGENTS.md` in your Codex home (`~/.codex` unless
+`CODEX_HOME` says otherwise). An evaluation must not carry them, so `python -m copilot eval` with Codex refuses
+to run from a home that has them, unless `--allow-personal-codex` is given. `python -m copilot doctor` checks
+the home and the prompt Codex renders for it (`codex debug prompt-input`: local, no model call). Each run records
+the Codex version, the home's folder name and whether it was isolated.
 
 ### Use it from Claude Code (MCP)
 
@@ -134,7 +142,14 @@ export COPILOT_DATABASE_URL="postgresql://copilot_reader:...@your-host:5432/post
 
 `eval/questions.jsonl` has 50 questions: 41 with a hand-checked reference query, in Indonesian (17), English
 (14) and Chinese (10), and 9 that must be refused (writes, salary and ID requests, a prompt injection,
-off-topic questions). Each run builds a fresh demo database dated today and compares result tables:
+off-topic questions).
+
+Each run builds a fresh demo database seeded at a fixed anchor day, 15 October 2026 unless `--anchor` says
+otherwise, and pins today's date to that day in both the reference SQL and the model's SQL: `CURRENT_DATE`,
+`NOW()` and the other clock functions become literals after the guard and before execution (`copilot/dates.py`).
+A run means the same thing on any day it is repeated, and the mid-month anchor keeps "this month" from covering
+a single day. Before any model call, every reference query must return rows with values at the anchor; if one is
+empty or all NULL, the run stops and names it. Then result tables are compared:
 
 | Metric | Meaning |
 |---|---|
@@ -148,7 +163,26 @@ off-topic questions). Each run builds a fresh demo database dated today and comp
 ```bash
 python -m copilot eval --oracle         # checks the harness itself: returns the reference SQL, must score 100%
 python -m copilot eval --workers 4      # the real run with your model; writes eval/results/latest.md
+python -m copilot check-gold --anchor 2026-09-24   # does every reference query return values on that day?
 ```
+
+### Replay and rescore, without a model
+
+Every scored question keeps its steps, its summary, and for both the reference and the answer the row count and
+a sha256 of the sorted result rows. Every model call is appended to `eval/cassettes/<run>.jsonl` with its UTC
+time, backend, model, reasoning effort, Codex version, the sha256 of the messages, the messages, the reply and
+the token counts.
+
+```bash
+python -m copilot eval --replay eval/cassettes/RUN.jsonl   # answers every call from the recording, calls no model
+python -m copilot rescore eval/results/RUN.json            # reruns the stored SQL and the reference SQL
+python -m copilot rescore --all                            # every eval/results/*-codex_*.json
+```
+
+A replay asks the recorded run's questions at its anchor and, with the same code, reproduces its scores exactly (cost
+shows zero: a replay spends nothing). Rescoring seeds a demo database at the run's anchor, reruns the model's
+stored SQL and the reference SQL with the date pinned, recomputes strict, relaxed, refusal and schema-recall
+scores and prints them next to the stored ones.
 
 ### Results
 
@@ -188,18 +222,22 @@ The fixes came from reading run 1's misses, so run 2 is not a blind measurement.
 fresh set of questions the copilot has never seen.
 
 Two more caveats, found in review. Runs 1 to 3 went through the author's everyday Codex install, which adds his
-personal Codex instructions to every call; later runs use an isolated Codex home. And many questions depend on
-today's date ("this month"), while each run builds its demo data dated the day it runs, so a rerun on another
-day is not an exact replay; the evaluation will pin the date.
+personal Codex instructions to every call (`--ignore-user-config` skips only Codex's `config.toml`, not the
+`AGENTS.md`); the evaluation now refuses to run that way unless told to. And many questions depend on today's
+date ("this month"): runs 1 to 3 ran on the day their demo data was dated, and a rerun on another day would not
+have been an exact replay. The evaluation now pins the date to an anchor day. Rescoring runs 1 to 3 at
+24 September 2026, with the date pinned, reproduces every score above, question by question; the tests check
+this on every push.
 
 ### Verify it yourself, without a model
 
 ```bash
-python -m pytest -q                 # the locks, the guard, the number check, the evaluation harness
+python -m pytest -q                 # the locks, the guard, the number check, the evaluation harness, runs 1-3 rescored
 python -m copilot eval --oracle     # the harness scores the reference answers: must be 100%
+python -m copilot rescore --all     # every stored Codex run, rescored from its stored SQL
 ```
 
-The same two commands run on every push (the CI badge above).
+The first two run on every push (the CI badge above).
 
 ## Project layout
 
@@ -207,7 +245,7 @@ The same two commands run on every push (the CI badge above).
 |---|---|
 | `sql/01_integra_subset.sql` | the part of Integra's schema the copilot reads, names identical to Integra |
 | `sql/02_copilot_views.sql` | the view layer and the read-only role |
-| `data/seed.py` | deterministic fictional data, dated relative to today; books balance |
+| `data/seed.py` | deterministic fictional data, dated relative to an anchor day; books balance |
 | `copilot/semantic.py` | what each view means, in three languages; schema retrieval |
 | `copilot/guard.py` | the SQL guard |
 | `copilot/agent.py` | the loop: plan, guard, execute, repair, summary |
@@ -216,8 +254,12 @@ The same two commands run on every push (the CI badge above).
 | `copilot/api.py`, `web/index.html` | HTTP API and the demo page |
 | `copilot/mcp_server.py` | MCP tools |
 | `copilot/evaluate.py`, `eval/` | evaluation set and runner |
+| `copilot/dates.py` | pins today's date to the anchor day in every evaluated query |
+| `copilot/cassette.py`, `eval/cassettes/` | every model call of a run, recorded; replay without a model |
+| `copilot/rescore.py` | rescores a stored run from its stored SQL, without a model |
+| `copilot/doctor.py` | the Codex check: binary, version, Codex home, personal instructions |
 | `copilot/llm.py` | the model clients: any OpenAI-compatible API, or ChatGPT through the Codex CLI |
-| `tests/` | 70 tests |
+| `tests/` | 93 tests |
 
 ## Limits, honestly
 
