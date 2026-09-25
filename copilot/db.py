@@ -2,14 +2,17 @@
 
 - an admin connection, used once to create the demo database and the view layer;
 - a reader connection, as the `copilot_reader` role, which is the only thing the agent ever uses.
-  That role can read the views in the `copilot` schema and nothing else, every transaction is read-only,
-  and every statement is cut off after a few seconds (see sql/02_copilot_views.sql).
+  That role has no grant on Integra's base tables and cannot write. ReadOnlyDB.run makes every transaction
+  read-only and sets a statement timeout for it. A statement sent without the guard can still read the
+  system catalogue and lift its own timeout with a smuggled SET: the guard stops those, not the role
+  (see sql/02_copilot_views.sql and the red-team section of the README).
 """
 import datetime as dt
 import decimal
 import os
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,15 +73,20 @@ def demo_database(admin_uri, company="A"):
     return admin_uri if company == "A" else database(admin_uri, f"company_{company.lower()}")
 
 
-def create_demo(admin_uri, anchor=None, company="A"):
+def create_demo(admin_uri, anchor=None, company="A", poison=False):
     """Create Integra's tables, load one demo company ("A" or "B"), then create the copilot views and reader
-    role. One company per database: a database that already holds other data is refused."""
+    role. One company per database: a database that already holds other data is refused. With poison, the
+    canary strings of data/poison.py are planted in the new data (red-team runs only)."""
     seed = _seed(company)
     with psycopg.connect(admin_uri, autocommit=True) as conn:
         exists = conn.execute("select to_regclass('public.invoices') is not null").fetchone()[0]
         if not exists:
             conn.execute((SQL_DIR / "01_integra_subset.sql").read_text())
-            seed.load(conn, seed.generate(anchor, company=company))
+            tables = seed.generate(anchor, company=company)
+            if poison:
+                from data.poison import apply_poison
+                tables = apply_poison(tables)
+            seed.load(conn, tables)
         elif not conn.execute("select 1 from public.warehouses where code = %s",
                               (seed.COMPANIES[company]["warehouses"][0][0],)).fetchone():
             raise ValueError(f"This database already holds other data; company {company} needs its own database.")
@@ -87,10 +95,18 @@ def create_demo(admin_uri, anchor=None, company="A"):
 
 
 def _json_value(v):
+    """A database value as JSON: numbers stay numbers, dates and times become ISO text, an interval becomes its
+    length in days, and a UUID or bytes become text."""
     if isinstance(v, decimal.Decimal):
         return int(v) if v == v.to_integral_value() else float(v)
-    if isinstance(v, (dt.date, dt.datetime)):
+    if isinstance(v, (dt.date, dt.datetime, dt.time)):
         return v.isoformat()
+    if isinstance(v, dt.timedelta):
+        return v.total_seconds() / 86400
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, (bytes, memoryview)):
+        return bytes(v).hex()
     return v
 
 
@@ -115,8 +131,9 @@ class ReadOnlyDB:
             self._conn = psycopg.connect(self.uri, autocommit=True)
         return self._conn
 
-    def run(self, sql):
-        """Run one already-checked SELECT. Returns rows as JSON-safe lists, or the database's error text."""
+    def run(self, sql, timezone=None):
+        """Run one already-checked SELECT. Returns rows as JSON-safe lists, or the database's error text.
+        timezone, if given, is the session time zone for this transaction (evaluation fixes it; see dates.py)."""
         start = time.perf_counter()
         conn = self._connection()
         try:
@@ -124,6 +141,8 @@ class ReadOnlyDB:
                 with conn.cursor() as cur:
                     cur.execute("set transaction read only")
                     cur.execute(f"set local statement_timeout = {int(self.timeout_ms)}")
+                    if timezone:
+                        cur.execute("select set_config('TimeZone', %s, true)", (timezone,))
                     cur.execute(sql)
                     columns = [d.name for d in cur.description] if cur.description else []
                     fetched = cur.fetchmany(self.max_rows + 1)

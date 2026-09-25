@@ -1,8 +1,9 @@
 -- 02_copilot_views.sql
 -- The copilot never touches Integra's tables directly. It reads these views, in their own schema, through a
--- login role that can do nothing else. The views rename Integra's camelCase columns to plain snake_case,
--- turn enums into text, join in names, and leave out personal data: no salaries, BPJS numbers, NIK/NPWP
--- numbers, phone numbers, e-mails or bank accounts.
+-- login role with no grant on Integra's tables and no right to write (see the role at the end of this file for
+-- what it does not stop). The views rename Integra's camelCase columns to plain snake_case, turn enums into
+-- text, join in names, and leave out personal data: no salaries, BPJS numbers, NIK/NPWP numbers, phone
+-- numbers, e-mails or bank accounts.
 --
 -- Runs unchanged on a real Integra database. Run it as the database owner; set a strong password for
 -- copilot_reader outside this file (see README).
@@ -210,7 +211,13 @@ select a.id,
 from public.attendance a
 join public.employees e on e.id = a."employeeId";
 
--- The reader role: can log in, read the copilot views, and nothing else.
+-- The reader role: can log in and SELECT from the copilot views; it has no grant on Integra's base tables and
+-- cannot write. What it does NOT stop, on its own: like any role it can read the system catalogue
+-- (pg_catalog, information_schema) and call system functions such as pg_get_viewdef, and the settings below
+-- are only defaults. copilot.db.ReadOnlyDB makes each transaction read-only and sets its timeout again, but a
+-- statement that smuggles in its own SET (or COMMIT; BEGIN READ WRITE; ALTER ROLE copilot_reader SET ...) can
+-- lift the timeout or change these defaults. The guard (copilot/guard.py) stops all of that before SQL gets
+-- here; the red-team tests show it (tests/test_redteam.py, stack L1+L3).
 do $$ begin
   if not exists (select 1 from pg_roles where rolname = 'copilot_reader') then
     create role copilot_reader login;

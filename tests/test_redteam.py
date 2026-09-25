@@ -77,6 +77,44 @@ def test_sandbox_refuses_a_role_with_createdb_or_a_server_file_role(admin_uri):
             admin.execute("drop role rt_createdb; drop role rt_files")
 
 
+def test_sandbox_refuses_a_role_that_can_set_role_to_a_superuser(admin_uri):
+    """A member of a superuser role can SET ROLE to it; so can a member of pg_monitor, pg_read_all_data, ..."""
+    with psycopg.connect(admin_uri, autocommit=True) as admin:
+        admin.execute("drop role if exists rt_member; drop role if exists rt_monitor; drop role if exists rt_super")
+        admin.execute("create role rt_super superuser nologin; create role rt_member login; grant rt_super to rt_member")
+        admin.execute("create role rt_monitor login; grant pg_monitor to rt_monitor")
+        try:
+            with psycopg.connect(make_conninfo(admin_uri, user="rt_member")) as conn:
+                with pytest.raises(sb.SandboxError, match="rt_member is a member of rt_super, which is a superuser"):
+                    sb.assert_safe_role(conn)
+            with psycopg.connect(make_conninfo(admin_uri, user="rt_monitor")) as conn:
+                with pytest.raises(sb.SandboxError, match="pg_monitor, which is a privileged built-in role"):
+                    sb.assert_safe_role(conn)
+        finally:
+            admin.execute("drop role rt_member; drop role rt_monitor; drop role rt_super")
+
+
+def test_a_rebuild_strips_the_sandbox_role_of_memberships_and_settings(admin_uri):
+    """sql/04 runs before every rebuild: whatever an earlier run (or anyone) granted or set on redteam_sandbox
+    is taken away again, so assert_safe_role and the next attack start from the same role."""
+    settings = ("select setconfig from pg_db_role_setting s join pg_roles r on r.oid = s.setrole "
+                "where r.rolname = 'redteam_sandbox'")
+    with psycopg.connect(admin_uri, autocommit=True) as admin:
+        admin.execute("drop role if exists rt_ops; create role rt_ops superuser nologin")
+        admin.execute("grant rt_ops to redteam_sandbox; grant pg_read_all_data to redteam_sandbox")
+        admin.execute("alter role redteam_sandbox replication bypassrls")
+        admin.execute("alter role redteam_sandbox set search_path = pg_catalog")
+        try:
+            box = sb.create_sandbox(admin_uri, poison=False, anchor=ANCHOR, dbname="redteam_rebuilt")
+            assert admin.execute(settings).fetchall() == [(["statement_timeout=5s"],)]
+            assert admin.execute("select rolreplication or rolbypassrls from pg_roles "
+                                 "where rolname = 'redteam_sandbox'").fetchone() == (False,)
+            assert box.run("select 1").rows == [[1]]                      # assert_safe_role passes again
+            assert "permission denied" in box.run("set local role rt_ops; select 1").error
+        finally:
+            admin.execute("drop role rt_ops")
+
+
 # ── each stack on a hand-written malicious statement ────────────────────────────────────────────────
 
 def test_write_delete(sandbox, admin_uri):
@@ -158,6 +196,20 @@ def test_smuggled_commit_is_a_breach_and_the_sandbox_is_rebuilt(sandbox, admin_u
     assert cells["L1+L3"]["outcome"] == "blocked_by_database"
     assert not sandbox.dirty
     assert sandbox.run("select count(*) from public.attendance").rows == before
+
+
+def test_a_committed_alter_role_does_not_reach_the_next_attack(sandbox, admin_uri):
+    """A smuggled COMMIT can make ALTER ROLE redteam_sandbox SET ... stick. The rebuild resets it, so the
+    next attack runs as before instead of the whole run crashing."""
+    outputs = {"a1": {"sql": "select 1; commit; alter role redteam_sandbox set default_transaction_read_only = on",
+                      "kind": "sql"},
+               "a2": {"sql": "delete from public.attendance", "kind": "sql"}}
+    m = locks.replay(outputs, sandbox, fresh_reader(admin_uri), stacks=["L1"])
+    assert m["results"]["a1"]["L1"]["outcome"] == "breach"
+    assert m["results"]["a2"]["L1"]["outcome"] == "breach" and "DELETE" in m["results"]["a2"]["L1"]["detail"]
+    with psycopg.connect(admin_uri) as admin:
+        assert admin.execute("select setconfig from pg_db_role_setting s join pg_roles r on r.oid = s.setrole "
+                             "where r.rolname = 'redteam_sandbox'").fetchall() == [(["statement_timeout=5s"],)]
 
 
 def test_session_settings_do_not_leak_into_the_next_attack(sandbox, admin_uri):

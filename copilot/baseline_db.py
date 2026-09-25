@@ -1,8 +1,9 @@
 """The naive baseline's own database role, baseline_reader (sql/03_baseline_reader.sql).
 
 It can read Integra's base tables in schema public, personal data included, and nothing in the copilot schema.
-Like copilot_reader, every transaction is read-only and every statement stops after 5 seconds; the baseline
-also runs its SQL through the same ReadOnlyDB (read-only transaction, statement timeout, row cap).
+It runs its SQL through the same ReadOnlyDB as the copilot (read-only transaction, 5-second statement timeout,
+row cap). With no guard in front, a statement that smuggles in its own SET can lift the timeout, as for
+copilot_reader without the guard (see sql/02_copilot_views.sql).
 For the fictional demo database only.
 """
 import psycopg

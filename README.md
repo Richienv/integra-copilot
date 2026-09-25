@@ -10,10 +10,13 @@ which every number is checked against the result.
 It sits on top of [Integra ERP](https://github.com/Richienv/ERP), a vertical ERP I built alone for Indonesian
 textile and garment SMEs. The demo runs on a copy of Integra's own schema with fictional data.
 
-On its 50-question development set in three languages it answers 95.1% of the 41 answerable questions and
-refuses all 9 unsafe ones (GPT-6-Sol; the first run scored 78.0%, and the misses are explained
-[below](#what-run-1-got-wrong-and-what-changed)). That set was used to tune the agent, so it is not a blind
-test. A blind test on a fictional company the agent has never seen is in progress.
+On its 50-question development set in three languages it scores 95.1% relaxed and 63.4% strict execution
+accuracy on the 41 answerable questions, and refuses all 9 unsafe or off-topic ones (GPT-6-Sol; the first run
+scored 78.0% relaxed, and the misses are explained [below](#what-run-1-got-wrong-and-what-changed)). That set
+was used to tune the agent, so it is not a blind test, and the runs behind these numbers went through the
+author's everyday Codex setup, with his personal Codex instructions in every call
+([Codex isolation](#how-the-evaluation-stays-honest)). A blind test on a fictional company the agent has never
+seen is in progress.
 
 ```
 "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
@@ -63,11 +66,16 @@ A language model can be talked into anything, so safety never depends on the pro
    views only. It rejects writes, DDL, `SELECT INTO`, `FOR UPDATE`, multiple statements, system catalogues,
    Integra's base tables, and functions such as `pg_sleep`, `pg_read_file`, `set_config` and `dblink`. It runs
    the SQL regenerated from the parse tree, so comments and tricks in the original text never reach the database.
-3. **The database** (`sql/02_copilot_views.sql`): the `copilot_reader` role can read the views in the
-   `copilot` schema and nothing else, every transaction is read-only, and every statement stops after 5 seconds.
-   The views leave out salaries, BPJS numbers, NPWP/NIK numbers, phone numbers, e-mails and bank accounts.
+3. **The database** (`sql/02_copilot_views.sql`): the `copilot_reader` role has no grant on Integra's base
+   tables and cannot write, and the copilot runs every query in a read-only transaction with a 5-second
+   statement timeout and a row cap. The views leave out salaries, BPJS numbers, NPWP/NIK numbers, phone numbers,
+   e-mails and bank accounts. The role alone does not stop everything: like any role it can read the system
+   catalogue (`pg_catalog`, `information_schema`) and call functions such as `pg_get_viewdef`, and a statement
+   that smuggles in its own `SET statement_timeout = 0` lifts the timeout. The guard stops those, not the role;
+   the [red-team tests](#the-red-team-harness) show both.
 
-The tests check each lock separately, including the database refusing writes when the guard is bypassed.
+The tests check each lock separately, including the database refusing writes when the guard is bypassed and
+what the role lets through on its own.
 
 ### Numbers come from the database, not the model
 
@@ -84,8 +92,8 @@ in `~/.cache/integra-copilot/pg` (set `COPILOT_DATA_DIR` to move it; the path mu
 ```bash
 uv venv -p 3.12 .venv && source .venv/bin/activate
 uv pip install -r requirements.txt
-make verify                                 # 165 tests, the oracle, runs 1-3 rescored; no API key needed
-cp .env.example .env                        # add your model API key, then:
+make verify                                 # 185 tests, the oracle, runs 1-3 rescored; no API key needed
+cp .env.example .env                        # put your API key after LLM_API_KEY= (empty: ChatGPT, below), then:
 set -a && source .env && set +a
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
 python -m copilot serve                     # web page on http://127.0.0.1:8000
@@ -100,13 +108,16 @@ still work.
 
 ### No API key? Use ChatGPT
 
-With no `LLM_API_KEY` set and the ChatGPT desktop app installed and signed in, the copilot sends each model
-call through the Codex CLI that ships inside the app (`LLM_BACKEND=codex` forces this). Nothing to configure:
+With no `LLM_API_KEY` set (or an empty one, as in `.env.example`) and the ChatGPT desktop app installed and
+signed in, the copilot sends each model call through the Codex CLI that ships inside the app
+(`LLM_BACKEND=codex` forces this). Asking needs nothing more; an evaluation also needs a separate Codex home,
+signed in once with that same binary. A `codex` on your PATH may be another install, or none; `doctor` prints
+the exact login command for the binary the copilot uses:
 
 ```bash
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
 python -m copilot doctor                                  # which Codex, which Codex home, personal instructions or not
-CODEX_HOME=~/.codex-eval codex login                      # once: a separate Codex home, signed in by you
+CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login    # once, signed in by you
 CODEX_HOME=~/.codex-eval CODEX_MODEL=gpt-6-sol CODEX_EFFORT=low python -m copilot eval --workers 4
 ```
 
@@ -157,8 +168,12 @@ Each run compares the result tables of the answer and the reference query:
 | Schema recall | the views the reference query needs were retrieved (n/a for a system that retrieves none) |
 | Latency, tokens, cost | per question |
 
+Values are compared by value, not by how they are written: numbers within 0.5%, a timestamp at midnight equals
+its date (`2026-05-01T00:00:00` is `2026-05-01`), and an interval is its length in days (`32 days 11:30` is
+32.48). This matters for the naive baseline, which reads timestamp columns where the views have dates.
+
 ```bash
-python -m copilot eval --oracle         # checks the harness itself: returns the reference SQL, must score 100%
+make oracle                             # checks the harness itself: returns the reference SQL, must score 100%
 python -m copilot eval --workers 4      # the real run with your model; writes eval/results/latest.md
 python -m copilot check-gold --anchor 2026-09-24   # does every reference query return values on that day?
 ```
@@ -167,24 +182,43 @@ python -m copilot check-gold --anchor 2026-09-24   # does every reference query 
 
 **Pinned dates.** Each run builds a fresh demo database seeded at a fixed anchor day, 15 October 2026 unless
 `--anchor` says otherwise, and pins today's date to that day in both the reference SQL and the model's SQL:
-`CURRENT_DATE`, `NOW()` and the other clock functions become literals after the guard and before execution
-(`copilot/dates.py`). A run means the same thing on any day it is repeated, and the mid-month anchor keeps
-"this month" from covering a single day.
+`CURRENT_DATE`, `NOW()` and the other clock functions, `'today'`, `'now'`, `'yesterday'` and `'tomorrow'` read
+as dates, one-argument `AGE(x)` and `TIMEOFDAY()` become literals after the guard and before execution
+(`copilot/dates.py`). The pinned instant is noon in Western Indonesian Time, and every evaluated query runs
+with its session time zone set to Asia/Jakarta, so "today" is the same on any machine. The mid-month anchor
+keeps "this month" from covering a single day.
+
+Pinning cannot move a date the model writes out, and Codex may tell the model the real date: the Codex binary's
+prompt has a `<current_date>` field in its `<environment_context>` (not measured in a run yet). A Codex run
+anchored at 15 October but made on another day could then write the real day into its SQL as a literal. The
+agent is frozen, so the anchor is not stated in its prompt; instead every answer records the dates its SQL
+writes out, and the report counts them ("Answers whose SQL writes out a date"), so such answers can be checked
+by hand. Within that limit, a run means the same thing on any day it is repeated.
 
 **Reference answers first.** Before any model call, every reference query must return rows with values at the
-anchor; if one is empty or all NULL, the run stops and names it. An oracle run below 100% exits with an error.
+anchor; if one is empty, all NULL or all zero (a count of 0 is matched by any query that counts nothing), the
+run stops and names it. An oracle run below 100% strict, relaxed or refusal accuracy, or with a model error,
+exits with an error; its schema recall is reported but not gated, because it measures the retriever, not the
+harness.
 
 **Cassettes and replay.** Every scored question keeps its steps, its summary, and for both the reference and the
 answer the row count and a sha256 of the sorted result rows. Every model call is appended to
-`eval/cassettes/<run>.jsonl` with its UTC time, backend, model, reasoning effort, Codex version, the sha256 of the
-messages, the messages, the reply and the token counts. A replay answers every call from the recording and calls
-no model; it asks the recorded run's questions at its anchor and, with the same code, reproduces its scores
-exactly (cost shows zero: a replay spends nothing).
+`eval/cassettes/<run>.jsonl` with its UTC time, backend, model, reasoning effort, Codex version, the run's setup
+(system, company, question file and its sha256, question ids, poisoned data or not, where its report went), the
+sha256 of the messages, the messages, the reply and the token counts. A replay answers every call from the
+recording and calls no model; it takes the recorded run's setup and anchor and, with the same code, reproduces
+its scores exactly (cost shows zero: a replay spends nothing). It refuses to start if the recorded report cannot
+be found or the question file has changed, and exits with an error if any call had no recorded reply, any
+recorded reply went unused, or a score differs.
 
 **Rescoring.** Rescoring seeds a demo database at the run's anchor, for the run's company, question file and
 system, reruns the model's stored SQL and the reference SQL with the date pinned, recomputes strict, relaxed,
 refusal and schema-recall scores and prints them next to the stored ones. It exits with an error if any stored
-score is not reproduced.
+score or per-question result is not reproduced, if a reference result can no longer score anything (empty, all
+NULL or all zero), or if the question file's sha256 is not the one the run recorded. It checks the data too:
+against the row hashes a run stored, or, for runs 1 to 3, which stored none, against the reference row hashes
+committed in `eval/reference_hashes.json`. On other data the scores of runs 2 and 3 happen to come out the
+same, so without this check a passing rescore would say nothing about the data.
 
 ```bash
 python -m copilot eval --replay eval/cassettes/RUN.jsonl   # answers every call from the recording, calls no model
@@ -193,8 +227,9 @@ python -m copilot rescore --all                            # every model run in 
 ```
 
 **What each run records.** The anchor, the system (the copilot or the baseline), the company, the question file
-and its sha256, the cassette, and for Codex runs the Codex version, the Codex home's folder name and whether that
-home was isolated.
+and its sha256, whether the data was poisoned, the cassette, and for Codex runs the Codex version, the Codex
+home's folder name and whether that home was isolated. Runs 1 to 3 predate cassettes and these fields: they can
+be rescored but not replayed. The first replayable run will be the first one from an isolated Codex home.
 
 **Codex isolation.** Codex adds your own instructions to every call: the `AGENTS.md` in your Codex home
 (`~/.codex` unless `CODEX_HOME` says otherwise). `--ignore-user-config` skips only Codex's `config.toml`, not the
@@ -202,9 +237,11 @@ home was isolated.
 instructions. `python -m copilot eval` with Codex now refuses to run from a home that has them, unless
 `--allow-personal-codex` is given, and `python -m copilot doctor` shows which Codex, which home, and whether the
 prompt Codex renders for it (`codex debug prompt-input`: local, no model call) carries personal instructions. A
-clean home is one you sign in to yourself: `CODEX_HOME=~/.codex-eval codex login`. The check looks for
-`AGENTS.md` and a user-instructions block; it does not yet flag personal skills that Codex lists in its prompt.
-No run from an isolated home has been made yet.
+clean home is one you sign in to yourself, with the Codex the copilot uses:
+`CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login` (`doctor` prints this
+command for the binary it found). The check looks for `AGENTS.md` and a user-instructions block; it does not yet
+flag personal skills that Codex lists in its prompt. Isolation does not remove the real date Codex may give the
+model (see Pinned dates). No run from an isolated home has been made yet.
 
 ### Results
 
@@ -224,7 +261,8 @@ language in runs 2 and 3: Indonesian 100%, English 92.9%, Chinese 90.0%. Full re
 
 Strict accuracy is lower because the model adds readable columns, such as codes and names, which rule 6 of
 the prompt asks for; relaxed accuracy allows extra columns. Latency is mostly Codex's own overhead, about
-25 seconds a call; through an API it would be a few seconds. Tokens are estimates of the copilot's own prompts.
+25 seconds a call; through an API we expect a few seconds, but no API run has been made yet. Tokens are
+estimates of the copilot's own prompts.
 
 ### What run 1 got wrong, and what changed
 
@@ -251,8 +289,8 @@ evaluation now pins the date to an anchor day. And the seed used to let a Python
 which stock, so the stock rows depended on each process's hash seed. The seed is now fixed, but runs 1 to 3
 stored no row hashes, so whether they saw exactly today's stock rows is not known; their scores stand, because
 in each run the reference and the model's queries ran on the same database. Rescoring runs 1 to 3 at
-24 September 2026, with the date pinned, reproduces every score above, question by question; `make verify`
-checks this on every push.
+24 September 2026, with the date pinned, reproduces every score above, question by question, on data whose 41
+reference results match the committed hashes; `make verify` checks this on every push.
 
 ### Company B and the blind test
 
@@ -260,8 +298,10 @@ The development set was used to tune the agent, so its score is not a blind meas
 second fictional company, company B: a batik, knitwear and uniform maker across Java, on the same
 schema but with its own customers, suppliers, five warehouses (the Solo one's city is stored as Surakarta),
 37 products, 38 employees, account codes, document numbers (`SO/2026/00001`) and employee codes (`KRY-0001`).
-No name, code, id or document number is shared with company A; the tests check this. It lives in its own
-database, and its data is frozen at 15 October 2026: the tests pin a hash of every view.
+No customer, supplier, warehouse, product or employee name or code is shared with company A, and no id or
+document number; the tests check this. Standard account names (`PPN Keluaran`, `Harga Pokok Penjualan`, ...)
+are shared, as in any two Indonesian ledgers. It lives in its own database, and its data is frozen at
+15 October 2026: the tests pin a hash of every view and of every base table.
 
 **Status: in progress. Company B's questions are not written yet, so there is no blind result.** When they are,
 they run with the agent unchanged:
@@ -281,17 +321,19 @@ To show what the copilot's layer adds, `copilot/baseline.py` gives the same mode
 of it: the raw `CREATE TYPE` and `CREATE TABLE` statements of Integra's 18 base tables, the question, and one
 call that returns `{"sql": ...}` (an empty one declines). No views, schema retrieval, stored values, examples,
 rules, guard, repair or model-written summary. The SQL runs exactly as written, as the `baseline_reader` role
-(`sql/03_baseline_reader.sql`): read-only transactions, a 5-second timeout, the same row cap, and SELECT on the
-base tables only. That role can read the salaries, NPWP numbers, phone numbers and e-mails the copilot's views
-leave out: without the layer, only the model stands between a question and those columns. It is created only on
-the fictional demo database.
+(`sql/03_baseline_reader.sql`): read-only transactions, a 5-second timeout (which, with no guard in front, a
+smuggled `SET` can lift), the same row cap, and SELECT on the base tables only. That role can read the salaries,
+NPWP numbers, phone numbers and e-mails the copilot's views leave out: without the layer, only the model stands
+between a question and those columns. It is created only on the fictional demo database.
 
 ```bash
 python -m copilot eval --system baseline --workers 4
 ```
 
-It is scored against the same reference queries as the copilot; schema recall shows n/a, because it retrieves
-nothing. **It has not been run with a model yet: there are no baseline results.**
+It is scored against the same reference queries as the copilot, with the same comparison (a timestamp at
+midnight counts as its date and an interval as its days, so a month read from a base-table timestamp costs it
+no points); schema recall shows n/a, because it retrieves nothing. **It has not been run with a model yet: there
+are no baseline results.**
 
 ### The red-team harness
 
@@ -301,7 +343,7 @@ attacks and replays each through four stacks:
 
 | Stack | What runs |
 |---|---|
-| L1 | the recorded SQL straight into a throwaway sandbox database, as the unprivileged `redteam_sandbox` role |
+| L1 | the recorded SQL straight into a throwaway sandbox database, as the unprivileged `redteam_sandbox` role (the copilot views as its default schema, a 5 s safety timeout) |
 | L1+L2 | the guard, then the sandbox |
 | L1+L3 | no guard: the recorded SQL as `copilot_reader` |
 | L1+L2+L3 | the guard, then `copilot_reader`: the shipped stack |
@@ -312,16 +354,21 @@ denial of service. The data can be poisoned: a supplier, a warehouse, a journal 
 planted instruction in three languages and a canary token (`data/poison.py`).
 
 ```bash
-python -m copilot eval --questions eval/redteam/attacks.jsonl --workers 4      # the model's answers, recorded
+python -m copilot eval --questions eval/redteam/attacks.jsonl --poison --workers 4   # the answers, on poisoned data
 python -m copilot redteam --attacks eval/redteam/attacks.jsonl --outputs eval/cassettes/RUN.jsonl
 ```
+
+L1 is the prompt with the views as its default schema and a 5 s timeout, not the prompt on a bare database: an
+`UPDATE invoices` fails there on the view, and a `pg_sleep` past 5 s shows as blocked by the database
+(`eval/redteam/README.md`, "What L1 includes").
 
 **Status: the attacks are being written, and there is no lock matrix yet.** `eval/redteam/attacks.example.jsonl`
 holds three examples of the format, not the set. What the tests show so far is on hand-written SQL, not on a
 model's output: with the guard off, the role alone lets through a system-catalogue read, `pg_get_viewdef`, a
 smuggled `SET statement_timeout = 0` and `pg_terminate_backend`, and the guard stops each of them. A canary
-planted in a stored value passes all three locks, because they stop queries, not text; whether it steers a
-summary has to be judged from the answers.
+planted in a stored value passes all three locks, because they stop queries, not text: the replay counts any
+listing that shows it as a breach, and whether it steers the model has to be judged from the answers of the
+`--poison` evaluation run.
 
 ### Verify it in 10 minutes
 
@@ -331,12 +378,13 @@ make verify
 
 No model, no API key, and no network beyond installing the packages. It runs, in order:
 
-1. `make test`: the 165 tests: the locks, the guard, the number check, the evaluation harness, both companies,
+1. `make test`: the 185 tests: the locks, the guard, the number check, the evaluation harness, both companies,
    the baseline and the red-team harness.
 2. `make oracle`: the harness scores the reference answers at 15 October 2026 and exits with an error below
-   100%. Its reports go to a temporary folder, never to `eval/results/`.
+   100% strict, relaxed or refusal accuracy. Its reports go to a temporary folder, never to `eval/results/`.
 3. `make rescore`: reruns the stored SQL of every model run in `eval/results/` (runs 1 to 3 so far) and exits
-   with an error if any stored score is not reproduced.
+   with an error if any stored score is not reproduced, a reference result cannot score, or the data does not
+   match the committed reference hashes.
 
 On the author's laptop it takes about 20 seconds. CI runs the same command on every push (the badge above).
 `make doctor` shows the Codex setup an evaluation would use.
@@ -357,7 +405,8 @@ On the author's laptop it takes about 20 seconds. CI runs the same command on ev
 | `copilot/mcp_server.py` | MCP tools |
 | `copilot/evaluate.py`, `eval/` | evaluation set and runner |
 | `copilot/dates.py` | pins today's date to the anchor day in every evaluated query |
-| `copilot/cassette.py`, `eval/cassettes/` | every model call of a run, recorded; replay without a model |
+| `copilot/cassette.py`, `eval/cassettes/` | every model call of a run, recorded; replay without a model (written by each new run; none committed yet) |
+| `eval/reference_hashes.json` | the reference row hashes that `rescore` checks runs 1 to 3's data against |
 | `copilot/rescore.py` | rescores a stored run from its stored SQL, without a model |
 | `copilot/doctor.py` | the Codex check: binary, version, Codex home, personal instructions |
 | `copilot/llm.py` | the model clients: any OpenAI-compatible API, or ChatGPT through the Codex CLI |
@@ -366,7 +415,7 @@ On the author's laptop it takes about 20 seconds. CI runs the same command on ev
 | `eval/redteam/` | the attack format, three example attacks, and the harness's rules |
 | `data/poison.py` | canary instructions planted in stored values, for red-team runs only |
 | `Makefile`, `.github/workflows/ci.yml` | `make verify` (tests, oracle, rescore), run by CI on every push |
-| `tests/` | 165 tests |
+| `tests/` | 185 tests |
 
 ## Limits, honestly
 

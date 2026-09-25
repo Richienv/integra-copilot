@@ -29,6 +29,17 @@ FROZEN = {
 }
 
 
+# sha256 of every row of Integra's 18 base tables (see base_digest), which the naive baseline reads, columns no
+# view shows included. Taken from the code of the commit that added them. The personal-data fields (npwp, phone,
+# e-mail, bank account) became DEMO- values after 45387db, so company A's base rows differ from those runs 1 to 3
+# ran on (they read the views only, which did not change); these pin the base tables from here on.
+FROZEN_BASE = {
+    ("A", ANCHOR): "80faef788e269eeaf15f343ee8f2df26bc0f90abd0a8878c132153625cfd6827",
+    ("A", LATE): "88f809b52a75fbeeafed24626b1ffcaa776149ac81fd6ed0eed925fee96a0941",
+    ("B", LATE): "ea1c8cb8abdc0e0df52164625069a510842efe519d97a234bf05834b975e5ef8",
+}
+
+
 def _canon(v):
     if isinstance(v, decimal.Decimal):
         return str(v)
@@ -56,6 +67,21 @@ def views_digest(uri):
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
+def base_digest(uri):
+    """Like views_digest, over every table in schema public (read as the admin)."""
+    out = {}
+    with psycopg.connect(uri) as conn:
+        names = [r[0] for r in conn.execute("select table_name from information_schema.tables "
+                                            "where table_schema = 'public' and table_type = 'BASE TABLE' order by 1")]
+        for name in names:
+            cur = conn.execute(f'select * from public."{name}"')
+            out[name] = {"columns": [d.name for d in cur.description],
+                         "rows": sorted(json.dumps([_canon(v) for v in r], ensure_ascii=False, separators=(",", ":"))
+                                        for r in cur)}
+    blob = json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return len(out), hashlib.sha256(blob.encode()).hexdigest()
+
+
 @pytest.fixture(scope="session")
 def company_a_late_uri(admin_uri):
     uri = db.database(admin_uri, "company_a_20261015")
@@ -76,6 +102,12 @@ def test_view_contents_are_frozen(demo):
     reader = db.reader_uri(uri)
     assert len(view_contents(reader)) == 16
     assert views_digest(reader) == FROZEN[company, anchor]
+
+
+def test_base_table_contents_are_frozen(demo):
+    """The baseline reads the base tables, including columns no view shows, so they are pinned too."""
+    company, anchor, uri = demo
+    assert base_digest(uri) == (18, FROZEN_BASE[company, anchor])
 
 
 def test_data_does_not_depend_on_the_hash_seed():

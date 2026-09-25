@@ -76,8 +76,9 @@ def test_personal_home_is_found_by_file_and_by_rendered_prompt(codex, monkeypatc
 def test_evaluation_refuses_a_personal_codex_home(codex, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(codex / "home-personal"))
     model = llm.CodexModel()
-    with pytest.raises(SystemExit, match="AGENTS.md.*--allow-personal-codex"):
+    with pytest.raises(SystemExit, match="AGENTS.md.*--allow-personal-codex") as refused:
         codex_gate(model)
+    assert f'CODEX_HOME=~/.codex-eval "{codex / "codex"}" login' in str(refused.value)
     assert codex_gate(model, allow_personal=True) == {"codex_version": "9.9.9-test", "codex_home": "home-personal",
                                                        "codex_isolation": "personal", "allow_personal_codex": True}
     assert codex_gate(llm.ScriptedModel(lambda m, j: "")) == {}
@@ -106,3 +107,5 @@ def test_doctor_command(codex, capsys):
     out = capsys.readouterr().out
     assert "codex version      9.9.9-test" in out and "AGENTS.md in home  none" in out
     assert "isolation          isolated" in out
+    # the login command names the binary the copilot uses, not whatever `codex` is on the PATH
+    assert f'clean home         CODEX_HOME=~/.codex-eval "{codex / "codex"}" login' in out

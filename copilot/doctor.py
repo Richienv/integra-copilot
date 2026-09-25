@@ -3,9 +3,11 @@
 Codex adds its own agent instructions to every call. It also adds the user's personal instructions: an
 AGENTS.md in the Codex home (CODEX_HOME, default ~/.codex). An evaluation must not carry someone's personal
 instructions, so evaluation with Codex runs only from a home without them, unless --allow-personal-codex is
-given. To set up an isolated home, sign in to it yourself (auth files are never copied):
+given. To set up an isolated home, sign in to it yourself (auth files are never copied), with the Codex the
+copilot uses: the one inside the ChatGPT app, not necessarily the `codex` on your PATH. `doctor` prints this
+command for the binary it found:
 
-    CODEX_HOME=~/.codex-eval codex login
+    CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login
     CODEX_HOME=~/.codex-eval python -m copilot doctor      # isolation: isolated
     CODEX_HOME=~/.codex-eval python -m copilot eval --workers 4
 
@@ -22,6 +24,11 @@ from .llm import CodexModel
 
 AGENTS_FILES = ("AGENTS.md", "AGENTS.override.md")
 USER_BLOCKS = ("# AGENTS.md instructions", "<INSTRUCTIONS>", "<user_instructions>")
+
+
+def login_command(binary):
+    """The command that signs a separate, clean Codex home in with the binary the copilot uses."""
+    return f'CODEX_HOME=~/.codex-eval "{binary}" login' if binary else None
 
 
 def codex_home(env=None):
@@ -96,8 +103,8 @@ def codex_gate(llm, allow_personal=False):
     if s["isolation"] == "personal" and not allow_personal:
         found = ", ".join(s["agents_md"]) or "a user-instructions block in the rendered prompt"
         raise SystemExit(f"Codex home {s['codex_home']} carries personal instructions ({found}), which would reach "
-                         "the model in every call. Point CODEX_HOME to a home without them (see python -m copilot "
-                         "doctor), or pass --allow-personal-codex to run anyway.")
+                         "the model in every call. Point CODEX_HOME to a home without them (sign one in with: "
+                         f"{login_command(llm.binary)}), or pass --allow-personal-codex to run anyway.")
     if s["isolation"] == "unverified":
         print(f"Warning: could not render Codex's prompt to check for personal instructions ({s['codex_home']}).",
               flush=True)
@@ -121,4 +128,6 @@ def main():
                "personal": "evaluation refuses to run without --allow-personal-codex",
                "unverified": "evaluation runs, with a warning"}[s["isolation"]]
     print(f"isolation          {s['isolation']}: {verdict}")
+    if s["binary"]:
+        print(f"clean home         {login_command(s['binary'])}   (once, signed in by you; then set CODEX_HOME)")
     return s

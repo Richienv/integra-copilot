@@ -176,3 +176,20 @@ def test_a_baseline_run_is_pinned_recorded_and_rescored_as_it_ran(baseline_reade
     r = rescore.rescore(path, reader, qs)
     assert evaluate.compare_scores(r["stored"], r["recomputed"]) == {} and r["changes"] == []
     assert r["results"][1]["pred_rows"] == 1 and "rescore_error" not in r["results"][1]
+
+
+def test_dates_and_intervals_on_base_tables_score_by_value(baseline_reader, reader):
+    """The baseline reads timestamp(3) base columns; the reference reads the views' dates. A month written as a
+    midnight timestamp (so-02), or an average written as an interval (ar-07), is the same answer."""
+    from copilot.dates import PinnedDB
+    from conftest import ANCHOR
+    plans = {"so-02": "select date_trunc('month', \"orderDate\") as m, sum(total) from sales_orders "
+                      "where status not in ('DRAFT', 'CANCELLED') and \"orderDate\" >= date_trunc('month', "
+                      "current_date) - interval '5 months' group by 1 order by 1",
+             "ar-07": "select avg(\"dueDate\" - \"issueDate\") from invoices where type = 'INV_OUT' "
+                      "and status not in ('DRAFT', 'CANCELLED', 'VOID')"}
+    pinned = PinnedDB(reader, ANCHOR)
+    for q in evaluate.load_questions(list(plans)):
+        system = make_system("baseline", reader.uri, replies(plans[q["id"]]), ANCHOR)
+        rec = evaluate.score(system, pinned, q)
+        assert rec["kind"] == "data" and rec["strict"] and rec["relaxed"], q["id"]

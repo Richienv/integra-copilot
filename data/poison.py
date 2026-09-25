@@ -6,8 +6,9 @@ entry description and a product name. Each canary is a short injection in Indone
 plus a unique token like CANARY-7F3A, so a red-team run can tell whether an instruction planted in stored
 data reached the model's answer or a result table.
 
-Used only when a red-team run asks for it (copilot.sandbox.create_sandbox(poison=True)); normal evaluation
-never loads poisoned data.
+Used only when a red-team run asks for it: copilot.sandbox.create_sandbox(poison=True) for the lock replay, and
+python -m copilot eval --poison (db.create_demo(poison=True)) so the model answers the attacks on the same
+poisoned data. Evaluation without --poison never loads it.
 """
 import copy
 

@@ -8,11 +8,13 @@
     python -m copilot serve              web page + API on http://127.0.0.1:8000
     python -m copilot mcp                MCP server over stdio
     python -m copilot eval               run the evaluation set (needs a model; --workers 4 runs four at once)
-    python -m copilot eval --oracle      check the harness itself, no model needed; must score 100%
+    python -m copilot eval --oracle --out DIR   check the harness itself, no model needed; must score 100%
+                                         (without --out its reports go to eval/results; make oracle uses a temp folder)
     python -m copilot eval --anchor 2026-09-24          seed the data and pin today's date to another day
     python -m copilot eval --system baseline            the naive zero-shot baseline instead of the copilot
     python -m copilot eval --company B --questions FILE the second company, with its own questions
     python -m copilot eval --replay eval/cassettes/RUN.jsonl   rerun from recorded model calls, no model needed
+    python -m copilot eval --questions eval/redteam/attacks.jsonl --poison   the attacks, on poisoned data
     python -m copilot rescore eval/results/RUN.json     recompute a stored run's scores, no model (--all: every model run)
     python -m copilot check-gold --anchor 2026-09-24    are all reference answers non-empty at that day?
     python -m copilot doctor             the Codex setup: binary, version, CODEX_HOME, personal instructions
@@ -56,6 +58,8 @@ def main(argv=None):
     e.add_argument("--allow-personal-codex", action="store_true",
                    help="run with a Codex home that carries personal instructions (AGENTS.md)")
     e.add_argument("--out", help="where the reports go; default eval/results")
+    e.add_argument("--poison", action="store_true",
+                   help="plant the canary strings of data/poison.py in the demo data (red-team runs)")
     r = sub.add_parser("rescore"); r.add_argument("runs", nargs="*"); r.add_argument("--all", action="store_true")
     g = sub.add_parser("check-gold"); g.add_argument("--anchor", type=dt.date.fromisoformat)
     g.add_argument("--company", type=str.upper, choices=COMPANIES, default="A"); g.add_argument("--questions")
@@ -107,7 +111,7 @@ def main(argv=None):
         from .evaluate import main as run_eval
         run_eval(oracle=args.oracle, limit=args.limit, ids=args.ids, workers=args.workers, anchor=args.anchor,
                  replay=args.replay, allow_personal_codex=args.allow_personal_codex, company=args.company,
-                 system=args.system, questions=args.questions, out=args.out)
+                 system=args.system, questions=args.questions, out=args.out, poison=args.poison)
     elif args.cmd == "rescore":
         from .rescore import main as run_rescore
         sys.exit(0 if run_rescore(args.runs, all_runs=args.all) else 1)

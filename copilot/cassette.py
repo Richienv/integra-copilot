@@ -1,13 +1,15 @@
 """Cassettes: every model call of an evaluation run, recorded so the run can be replayed without a model.
 
 Each line of eval/cassettes/<run name>.jsonl is one call: when it was made (UTC), the backend, the model,
-its reasoning effort, the Codex version if any, the anchor day, the sha256 of the messages, the messages,
-the reply and the token usage. A failed call is recorded with its error.
+its reasoning effort, the Codex version if any, the anchor day, the run's setup (system, company, question
+file and its sha256, question ids, poison, where its report was written), the sha256 of the messages, the
+messages, the reply and the token usage. A failed call is recorded with its error.
 
     python -m copilot eval --replay eval/cassettes/<run name>.jsonl
 
 answers every call from the cassette, matched by the hash of its messages, and never calls a model. With the
-same code and anchor, a replay reproduces the recorded run's scores exactly.
+same code and anchor, a replay reproduces the recorded run's scores exactly; it counts the calls that had no
+recorded reply and the recorded replies it never used, and the evaluation fails a replay with either.
 """
 import datetime as dt
 import hashlib
@@ -40,10 +42,10 @@ def describe(llm):
 class Recorder:
     """Wraps a model and appends every call to a cassette. Safe to share between worker threads."""
 
-    def __init__(self, llm, path, anchor=None):
+    def __init__(self, llm, path, anchor=None, setup=None):
         self.llm, self.path = llm, Path(path)
         self.model, self.note = llm.model, getattr(llm, "note", "")
-        self.info = {**describe(llm), "anchor": str(anchor) if anchor else None}
+        self.info = {**describe(llm), "anchor": str(anchor) if anchor else None, "setup": setup or {}}
         self.lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +71,8 @@ class Recorder:
 
 class Replay:
     """Answers every call from a cassette, matched by the hash of the messages. Never calls a model.
-    Identical calls get the recorded replies in the recorded order; a call with no recorded reply fails."""
+    Identical calls get the recorded replies in the recorded order; a call with no recorded reply fails and is
+    counted in missed. setup is the recorded run's setup ({} for a cassette that has none)."""
     backend = "replay"
 
     def __init__(self, path):
@@ -80,16 +83,21 @@ class Replay:
         self.replies = defaultdict(deque)
         for e in entries:
             self.replies[e["hash"]].append(e)
-        self.model, self.anchor = entries[0]["model"], entries[0].get("anchor")
+        self.model, self.anchor, self.setup = entries[0]["model"], entries[0].get("anchor"), entries[0].get("setup") or {}
         self.note = f"Replayed from {self.path.name}: every model call answered from the cassette, none made."
         self.lock = threading.Lock()
-        self.served = 0
+        self.served = self.missed = 0
+
+    def unused(self):
+        """How many recorded replies no call has asked for yet."""
+        return sum(len(q) for q in self.replies.values())
 
     def chat(self, messages, json_mode=False, temperature=0.0):
         key = messages_hash(messages)
         with self.lock:
             queue = self.replies.get(key)
             if not queue:
+                self.missed += 1
                 raise RuntimeError(f"No recorded reply for this call (messages sha256 {key[:12]}) in {self.path.name}.")
             e = queue.popleft()
             self.served += 1

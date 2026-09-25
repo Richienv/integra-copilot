@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from copilot import baseline, evaluate, guard, rescore
+from copilot import baseline, db, evaluate, guard, rescore
 from copilot.agent import Copilot
 from copilot.cassette import Replay, messages_hash
 from copilot.dates import PinnedDB
@@ -99,10 +99,20 @@ BAD = [{"id": "t-empty", "lang": "en", "question": "Negative balances?", "expect
         "gold_sql": "SELECT COUNT(*) FROM invoices"}]
 
 
+ZERO = [{"id": "t-zero", "lang": "en", "question": "How many negative balances?", "expect": "sql", "ordered": False,
+         "gold_sql": "SELECT COUNT(*) FROM invoices WHERE balance_due < 0"},
+        {"id": "t-coalesce", "lang": "en", "question": "Sum of negative balances?", "expect": "sql", "ordered": False,
+         "gold_sql": "SELECT COALESCE(SUM(balance_due), 0) FROM invoices WHERE balance_due < 0"}]
+
+
 def test_reference_answers_are_checked_before_any_question(reader, pinned):
     assert len(evaluate.validate_gold(reader, evaluate.load_questions(), ANCHOR)) == 41
     with pytest.raises(evaluate.GoldError, match=r"t-empty \(empty\), t-null \(all NULL\)$"):
         evaluate.validate_gold(pinned, BAD)
+    # a reference of 0 is matched by any unrelated query that counts nothing, so it cannot score either
+    with pytest.raises(evaluate.GoldError, match=r"t-zero \(all zero\), t-coalesce \(all zero\)$"):
+        evaluate.validate_gold(pinned, ZERO)
+    assert evaluate.compare([[0]], ["n"], [[0]], False) == (True, True)            # why: SELECT COUNT(*) ... WHERE false
     model = evaluate.oracle_model(BAD)
     with pytest.raises(evaluate.GoldError, match="t-empty"):
         evaluate.evaluate(Copilot(pinned, model), pinned, BAD)
@@ -215,6 +225,9 @@ def test_eval_command_line(monkeypatch):
     assert evaluate.DEFAULT_ANCHOR.isoformat() == "2026-10-15"
     main(["eval", "--company", "b", "--system", "baseline", "--questions", "b.jsonl", "--out", "/tmp/x"])
     assert (seen["company"], seen["system"], seen["questions"], seen["out"]) == ("B", "baseline", "b.jsonl", "/tmp/x")
+    assert seen["poison"] is False
+    main(["eval", "--questions", "eval/redteam/attacks.jsonl", "--poison"])
+    assert seen["poison"] is True
     with pytest.raises(SystemExit):
         main(["eval", "--system", "oracle"])
 
@@ -230,7 +243,8 @@ def test_the_oracle_must_score_100_percent(reader, out, monkeypatch, capsys):
     elsewhere = out / "elsewhere"
     m = evaluate.main(oracle=True, ids=MIX, anchor=ANCHOR, out=str(elsewhere))
     assert m["strict_ex"] == m["relaxed_ex"] == m["refusal_accuracy"] == 100.0
-    assert "Oracle: 100% on every score." in capsys.readouterr().out
+    assert "Oracle: 100% strict, relaxed and refusal accuracy, no errors (schema recall 100.0%, not gated)." in \
+        capsys.readouterr().out
     assert len(list(elsewhere.glob("*-oracle.json"))) == 1 and (elsewhere / "latest.md").exists()
     assert not (out / "results").exists() and not (out / "cassettes").exists()     # eval/results untouched
 
@@ -238,8 +252,9 @@ def test_the_oracle_must_score_100_percent(reader, out, monkeypatch, capsys):
     monkeypatch.setattr(evaluate, "oracle_model", lambda qs: broken)
     with pytest.raises(SystemExit, match=r"The oracle must score 100%.*'errors': 1"):
         evaluate.main(oracle=True, ids=MIX, anchor=ANCHOR, out=str(elsewhere))
-    perfect = {"strict_ex": 100.0, "relaxed_ex": 100.0, "refusal_accuracy": 0.0, "errors": 0}
+    perfect = {"strict_ex": 100.0, "relaxed_ex": 100.0, "refusal_accuracy": 0.0, "errors": 0, "schema_recall": 92.7}
     assert evaluate.oracle_shortfall(perfect, [{"expect": "sql"}]) == {}          # no refusals asked: none needed
+    # schema recall measures the retriever on the question set, not the harness: reported, not gated
 
 
 B_SET = [{"id": "b-01", "lang": "en", "question": "How many warehouses do we have?", "expect": "sql", "ordered": False,
@@ -259,7 +274,7 @@ def test_company_b_runs_on_its_own_data_with_its_own_questions(company_b_reader,
     monkeypatch.setattr(evaluate, "demo_database",
                         lambda anchor, **kw: seeded.append((anchor, kw)) or company_b_reader.uri)
     m = evaluate.main(oracle=True, company="b", questions=str(qfile), anchor=LATE)
-    assert seeded == [(LATE, {"company": "B", "baseline": False})]
+    assert seeded == [(LATE, {"company": "B", "baseline": False, "poison": False})]
     assert (m["company"], m["system"], m["questions"]) == ("B", "copilot", 3)
     assert m["question_file"] == str(qfile.resolve())
     assert m["question_file_sha256"] == hashlib.sha256(qfile.read_bytes()).hexdigest()
@@ -270,3 +285,99 @@ def test_company_b_runs_on_its_own_data_with_its_own_questions(company_b_reader,
     r = rescore.rescore(path, company_b_reader)                         # its own questions, on company B's data
     assert evaluate.compare_scores(r["stored"], r["recomputed"]) == {} and r["changes"] == []
     assert [x["gold_rows"] for x in r["results"][:2]] == [1, 1]
+
+
+def test_a_midnight_timestamp_is_its_date():
+    """The baseline reads timestamp(3) base columns where the reference reads the views' dates: the same month."""
+    assert evaluate.compare([["2026-05-01", 5]], ["m", "n"], [["2026-05-01T00:00:00", 5]], True) == (True, True)
+    assert evaluate.compare([["2026-05-01"]], ["m"], [["2026-05-01T00:00:00+07:00"]], True) == (True, True)
+    assert evaluate.compare([["2026-05-01"]], ["m"], [["2026-05-01T08:00:00"]], True) == (False, False)
+
+
+def test_intervals_and_uuids_are_answers_not_model_errors(pinned):
+    """Rows are JSON-safe, so the copilot's summary step can read any result: an interval is its length in days,
+    a UUID, a time or bytes are text."""
+    q = {"id": "t-late", "lang": "en", "question": "How late is the latest invoice?", "expect": "sql",
+         "ordered": False, "gold_sql": "SELECT 1"}
+    for sql in ("SELECT MAX(NOW() - due_date) AS worst FROM invoices", "SELECT id FROM invoices LIMIT 1"):
+        model = ScriptedModel(lambda m, j, s=sql: json.dumps({"kind": "sql", "sql": s, "reason": ""}) if j else "Done.")
+        rec = evaluate.score(Copilot(pinned, model), pinned, q)
+        assert rec["kind"] == "data" and "error" not in rec, (sql, rec.get("error"))
+    r = pinned.run("select interval '36 hours', '00000000-0000-0000-0000-00000000002a'::uuid, time '08:30', "
+                   "'\\x0a0b'::bytea")
+    assert r.rows == [[1.5, "00000000-0000-0000-0000-00000000002a", "08:30:00", "0a0b"]]
+
+
+def test_answers_that_write_out_a_date_are_counted(pinned):
+    """Pinning cannot move a date written out in the SQL, and Codex tells the model the real date."""
+    assert evaluate.date_literals("select 1 where d >= '2026-09-01' and d < date '2026-10-01'") == \
+        ["2026-09-01", "2026-10-01"]
+    q = evaluate.load_questions(["ar-01"])[0]
+    sql = "SELECT COUNT(*) FROM invoices WHERE due_date < '2026-09-24'"
+    model = ScriptedModel(lambda m, j: json.dumps({"kind": "sql", "sql": sql, "reason": ""}) if j else "Done.")
+    rec = evaluate.score(Copilot(pinned, model), pinned, q)
+    assert rec["date_literals"] == ["2026-09-24"]
+    m = evaluate.summarise([rec], "scripted", "test")
+    assert m["answers_with_date_literals"] == 1
+    assert "| Answers whose SQL writes out a date | 1 |" in evaluate.render_report(m, [rec])
+
+
+def test_a_replay_that_does_not_reproduce_exits_with_an_error(reader, out, monkeypatch):
+    qs = evaluate.load_questions(MIX)
+    _, _, path = evaluate.run(mixed_model(qs), qs, reader.uri, ANCHOR)
+    lines = [json.loads(l) for l in (out / "cassettes" / f"{path.stem}.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert lines[0]["setup"] == {"system": "copilot", "company": None, "question_file": None,
+                                 "question_file_sha256": None, "poison": None, "ids": MIX,
+                                 "report": str(path.resolve())}
+    monkeypatch.setattr(evaluate, "demo_database", lambda anchor, **kw: reader.uri)
+
+    def cassette(name, entries):
+        p = out / name
+        p.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in entries), encoding="utf-8")
+        return str(p)
+    with pytest.raises(SystemExit, match=rf"did not reproduce {path.name}: 1 model call\(s\) had no recorded reply"):
+        evaluate.main(replay=cassette("short.jsonl", lines[1:]))             # the first recorded call is missing
+    lost = [dict(e, setup=dict(e["setup"], report=str(out / "gone.json"))) for e in lines]
+    with pytest.raises(SystemExit, match="Cannot find the report"):
+        evaluate.main(replay=cassette("orphan.jsonl", lost))                  # nothing to check the replay against
+
+
+def test_a_replay_takes_the_recorded_setup_and_refuses_a_changed_question_file(company_b_reader, out, tmp_path,
+                                                                                monkeypatch, capsys):
+    """A company-B run whose reports went elsewhere (--out) replays company B and its own questions."""
+    qfile = tmp_path / "company_b.jsonl"
+    qfile.write_text("".join(json.dumps(q, ensure_ascii=False) + "\n" for q in B_SET), encoding="utf-8")
+    qs = evaluate.load_questions(path=qfile)
+    extra = {"company": "B", "question_file": evaluate._label(qfile),
+             "question_file_sha256": hashlib.sha256(qfile.read_bytes()).hexdigest()}
+    elsewhere = tmp_path / "elsewhere"
+    model = ScriptedModel(evaluate.oracle_model(qs).fn, model="scripted-b")
+    m1, _, path = evaluate.run(model, qs, company_b_reader.uri, LATE, suffix="-company-b", extra=extra, out=elsewhere)
+    assert not (out / "results").exists()                                     # not in eval/results
+    seeded = []
+    monkeypatch.setattr(evaluate, "demo_database",
+                        lambda anchor, **kw: seeded.append((anchor, kw)) or company_b_reader.uri)
+    cassette = str(out / "cassettes" / f"{path.stem}.jsonl")
+    m2 = evaluate.main(replay=cassette, out=str(elsewhere))
+    assert seeded == [(LATE, {"company": "B", "baseline": False, "poison": False})]
+    assert (m2["company"], m2["questions"], m2["question_file"]) == ("B", 3, m1["question_file"])
+    assert f"Replay against {path.name}: same scores" in capsys.readouterr().out
+
+    qfile.write_text(qfile.read_text(encoding="utf-8") + "\n", encoding="utf-8")   # the questions changed since
+    with pytest.raises(SystemExit, match="has changed since the recorded run"):
+        evaluate.main(replay=cassette, out=str(elsewhere))
+    assert len(seeded) == 1                                                   # refused before any database
+
+
+def test_eval_runs_on_poisoned_data_when_asked(admin_uri, reader, out, monkeypatch):
+    """eval --poison lets the model answer the red-team questions on the same poisoned data the lock replay uses."""
+    uri = db.database(admin_uri, "company_a_poisoned")
+    db.create_demo(uri, anchor=ANCHOR, poison=True)
+    names = [r[0] for r in db.ReadOnlyDB(db.reader_uri(uri)).run("select name from warehouses").rows]
+    assert any("CANARY-9B2C" in n for n in names)
+    assert not any("CANARY" in r[0] for r in reader.run("select name from warehouses").rows)   # not by default
+    seeded = []
+    monkeypatch.setattr(evaluate, "demo_database", lambda anchor, **kw: seeded.append(kw) or reader.uri)
+    m = evaluate.main(oracle=True, ids=MIX, anchor=ANCHOR, poison=True, out=str(out / "elsewhere"))
+    assert seeded == [{"company": "A", "baseline": False, "poison": True}] and m["poison"] is True
+    assert rescore.run_setup(m) == ("A", "copilot", "eval/questions.jsonl", True)       # rescored on poisoned data

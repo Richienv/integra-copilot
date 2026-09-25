@@ -1,5 +1,7 @@
 import json
+import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -97,3 +99,19 @@ def test_demo_database_never_starts_from_a_path_with_a_space(tmp_path, monkeypat
     assert " " not in str(db.default_data_dir())
     with pytest.raises(ValueError, match="space"):
         db.local_server(tmp_path / "with space")
+
+
+def test_env_example_can_be_sourced_as_the_readme_says():
+    """README, Run it: cp .env.example .env, add your key, set -a && source .env && set +a. The empty optional
+    values (prices, database URL) must not crash, and without a key the API backend is not chosen."""
+    root = Path(__file__).resolve().parent.parent
+    code = "from copilot.llm import from_env; m = from_env(); print(type(m).__name__, getattr(m, 'price_in', '-'))"
+
+    def sourced(key):
+        script = f'set -a && . ./.env.example && LLM_API_KEY="{key}" && set +a && "{sys.executable}" -c "{code}"'
+        return subprocess.run(["/bin/sh", "-c", script], cwd=root, capture_output=True, text=True,
+                              env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}).stdout.split()
+    assert sourced("sk-test") == ["ChatModel", "0.0"]
+    assert sourced("")[0] in ("CodexModel", "NoneType")                  # ChatGPT through Codex, if installed
+    example = (root / ".env.example").read_text(encoding="utf-8")
+    assert "\nLLM_API_KEY=\n" in example                                 # no placeholder key to source by mistake

@@ -3,9 +3,9 @@
 Each run builds a fresh demo database seeded at a fixed anchor day (2026-10-15 unless --anchor says
 otherwise), and in both the reference SQL and the model's SQL the clock functions (CURRENT_DATE, NOW(), ...)
 are pinned to that day after the guard and before execution (copilot/dates.py). A run therefore means the
-same thing on any day it is repeated. The reference answers are checked first: if any is empty or all NULL
-at the anchor, the run stops and names them. Then every question is asked and the copilot's result table is
-compared with the reference result.
+same thing on any day it is repeated. The reference answers are checked first: if any is empty, all NULL or
+all zero at the anchor, the run stops and names them. Then every question is asked and the copilot's result
+table is compared with the reference result.
 
   strict execution accuracy   same columns and same rows (numbers within 0.5%)
   relaxed execution accuracy  every reference column is present, extra columns allowed
@@ -18,11 +18,20 @@ compared with the reference result.
     python -m copilot eval --oracle      # a stand-in that returns the reference SQL: tests the harness only
     python -m copilot eval --anchor 2026-09-24                    # another anchor day
     python -m copilot eval --replay eval/cassettes/RUN.jsonl      # answer every model call from a recording
-                                                                  # (the recorded run's questions and anchor)
+                                                                  # (the recorded run's setup, questions and
+                                                                  # anchor); exits with an error unless it
+                                                                  # reproduces the recorded scores
+    python -m copilot eval --questions eval/redteam/attacks.jsonl --poison   # red-team questions on data with
+                                                                  # the canaries of data/poison.py planted
     python -m copilot eval --system baseline   # the naive zero-shot baseline (copilot/baseline.py) instead
     python -m copilot eval --company B --questions FILE           # company B, with its own question file
 
-The oracle must score 100%: an oracle run below that exits with an error, because the harness is broken.
+The oracle must score 100% strict, relaxed and refusal accuracy with no errors: an oracle run below that exits
+with an error, because the harness is broken. Its schema recall is reported, not gated (it measures the
+retriever on the question set, not the harness).
+
+Values compare by value (see _eq): numbers within 0.5%, a timestamp at midnight equals its date, and an interval
+is already a number of days (db._json_value).
 
 Every scored record keeps the row counts and a sha256 of the sorted result rows (gold and predicted), the
 steps and the summary. Every model call is recorded in eval/cassettes/<run name>.jsonl (copilot/cassette.py),
@@ -32,6 +41,7 @@ import datetime as dt
 import hashlib
 import itertools
 import json
+import re
 import statistics
 import tempfile
 import threading
@@ -50,6 +60,7 @@ RESULTS = ROOT / "eval" / "results"
 CASSETTES = ROOT / "eval" / "cassettes"
 DEFAULT_ANCHOR = dt.date(2026, 10, 15)         # mid-month, so "this month" never covers a single day
 SCORES = ("strict_ex", "relaxed_ex", "refusal_accuracy", "schema_recall")
+SETUP = ("company", "question_file", "question_file_sha256", "poison")      # what a run records about its setup
 
 
 def questions_file(path=None):
@@ -85,7 +96,18 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+MIDNIGHT = re.compile(r"(\d{4}-\d{2}-\d{2})[T ]00:00:00(\.0+)?([+-]\d{2}(:\d{2})?|Z)?")
+
+
+def _plain(v):
+    """A value as the comparison reads it: a timestamp at midnight is its date. (Intervals are already numbers of
+    days, see db._json_value.) So '2026-05-01T00:00:00' from a base-table timestamp equals '2026-05-01'."""
+    m = MIDNIGHT.fullmatch(v.strip()) if isinstance(v, str) else None
+    return m.group(1) if m else v
+
+
 def _eq(a, b):
+    a, b = _plain(a), _plain(b)
     if _num(a) and _num(b):
         return abs(a - b) <= max(0.01, 0.005 * abs(b))
     if a is None or b is None:
@@ -157,7 +179,8 @@ def gold_results(reader, questions):
 
 
 def gold_problems(gold):
-    """The reference results that cannot score anything: an error, no rows, or only NULLs."""
+    """The reference results that cannot score anything: an error, no rows, only NULLs, or only zeros and NULLs
+    (a COUNT of 0 or a COALESCE(SUM, 0) of nothing, which any empty answer matches)."""
     bad = []
     for qid, (checked, r) in gold.items():
         if not checked.ok or r.error:
@@ -166,12 +189,14 @@ def gold_problems(gold):
             bad.append(f"{qid} (empty)")
         elif all(v is None for row in r.rows for v in row):
             bad.append(f"{qid} (all NULL)")
+        elif all(v is None or (_num(v) and v == 0) for row in r.rows for v in row):
+            bad.append(f"{qid} (all zero)")
     return bad
 
 
 def validate_gold(reader, questions, anchor=None):
     """Run the reference queries (dates pinned to the anchor, if given) and fail loudly, naming them, if any
-    errors, is empty or is all NULL. Returns the reference results for scoring."""
+    errors, is empty, is all NULL or is all zero. Returns the reference results for scoring."""
     if anchor is not None:
         reader = PinnedDB(reader, anchor)
     gold = gold_results(reader, questions)
@@ -206,6 +231,15 @@ def _views(system, question, ans):
     return list(views) if views is not None else None
 
 
+DATE_LITERAL = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+
+def date_literals(sql):
+    """The dates written out in a query ('2026-10-01'). Pinning cannot move them, and a model that sees the real
+    date (Codex puts it in every call) may write one for "today": such answers are worth a look by hand."""
+    return sorted(set(DATE_LITERAL.findall(sql or "")))
+
+
 def score(system, reader, q, gold=None):
     """Ask one question and compare the answer with the reference. A model failure is a miss, not a crash.
 
@@ -226,6 +260,7 @@ def score(system, reader, q, gold=None):
            "tokens": usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0), "cost": usage.get("cost", 0.0),
            "views": _views(system, q["question"], ans), "summary": getattr(ans, "summary", ""),
            "steps": getattr(ans, "steps", []), "pred_rows": len(rows), "pred_hash": rows_hash(rows) if kind == "data" else None}
+    rec["date_literals"] = date_literals(rec["sql"])
     if error is not None:
         rec["error"] = error
     if q["expect"] == "sql":
@@ -276,6 +311,7 @@ def summarise(results, model, anchor, note=""):
         "schema_recall": pct(sum(recall), len(recall)) if recall else None,
         "repaired_answers": sum(r["repairs"] > 0 and r.get("relaxed", False) for r in sql),
         "summaries_replaced": sum(not r["grounded"] for r in sql),
+        "answers_with_date_literals": sum(r["kind"] == "data" and bool(date_literals(r["sql"])) for r in results),
         "latency_p50_ms": round(statistics.median(ms)) if ms else 0,
         "latency_p95_ms": round(ms[int(0.95 * (len(ms) - 1))]) if ms else 0,
         "tokens_per_question": round(sum(r["tokens"] for r in results) / len(results)) if results else 0,
@@ -296,15 +332,18 @@ def render_report(metrics, results):
     if metrics.get("system"):
         lines += [f"System: {metrics['system']} · company {metrics.get('company', 'A')} · "
                   f"questions `{metrics.get('question_file', 'eval/questions.jsonl')}`", ""]
+    if metrics.get("poison"):
+        lines += ["Demo data poisoned: the canary strings of `data/poison.py` are planted in stored values.", ""]
     lines += ["| Metric | Result |", "|---|---|"]
     labels = [("strict_ex", "Strict execution accuracy (%)"), ("relaxed_ex", "Relaxed execution accuracy (%)"),
               ("refusal_accuracy", "Refusal accuracy (%)"), ("false_refusals", "False refusals"),
               ("errors", "Model errors (counted as misses)"),
               ("schema_recall", "Schema recall (%)"), ("repaired_answers", "Correct after a repair"),
               ("summaries_replaced", "Summaries replaced by the number check"),
+              ("answers_with_date_literals", "Answers whose SQL writes out a date"),
               ("latency_p50_ms", "Latency p50 (ms)"), ("latency_p95_ms", "Latency p95 (ms)"),
               ("tokens_per_question", "Tokens per question"), ("total_cost", "Total cost")]
-    lines += [f"| {label} | {'n/a' if metrics[key] is None else metrics[key]} |" for key, label in labels]
+    lines += [f"| {label} | {'n/a' if metrics.get(key) is None else metrics[key]} |" for key, label in labels]
     if metrics.get("note"):
         lines += ["", metrics["note"]]
     if metrics.get("codex_version") or metrics.get("codex_isolation"):
@@ -346,11 +385,12 @@ def write_report(metrics, results, name=None, out=None):
     return out / f"{name}.json"
 
 
-def demo_database(anchor, company="A", baseline=False):
+def demo_database(anchor, company="A", baseline=False, poison=False):
     """A fresh private PostgreSQL with one demo company seeded at the anchor day. Returns the reader's URI.
-    With baseline, the naive baseline's own role is created too (sql/03_baseline_reader.sql)."""
+    With baseline, the naive baseline's own role is created too (sql/03_baseline_reader.sql). With poison, the
+    canary strings of data/poison.py are planted in the data, for the red-team questions."""
     admin = db.demo_database(db.local_server(tempfile.mkdtemp(prefix="copilot-eval-"), cleanup_mode="delete"), company)
-    db.create_demo(admin, dt.date.fromisoformat(str(anchor)), company)
+    db.create_demo(admin, dt.date.fromisoformat(str(anchor)), company, poison=poison)
     if baseline:
         from .baseline_db import create_role
         create_role(admin)
@@ -362,8 +402,9 @@ def run(llm, questions, uri, anchor, workers=1, record=True, suffix="", extra=No
 
     system is "copilot" (the agent) or "baseline" (copilot/baseline.py; its role must exist on that database).
     Every query runs with its dates pinned to the anchor. The reference answers are checked before any model
-    call. With record=True every model call is appended to eval/cassettes/<run name>.jsonl. The reports go to
-    out (eval/results by default). Returns (metrics, results, path of the JSON report)."""
+    call. With record=True every model call is appended to eval/cassettes/<run name>.jsonl, with the run's
+    setup (system, company, question file and its sha256, question ids, poison, report path) so it can be
+    replayed. The reports go to out (eval/results by default). Returns (metrics, results, path of the JSON report)."""
     from .baseline import make_system
     anchor = dt.date.fromisoformat(str(anchor))
     name = run_name(llm.model, suffix, out)
@@ -371,7 +412,9 @@ def run(llm, questions, uri, anchor, workers=1, record=True, suffix="", extra=No
     gold = validate_gold(reader, questions)
     if record:
         from .cassette import Recorder
-        llm = Recorder(llm, CASSETTES / f"{name}.jsonl", anchor)
+        setup = {"system": system, **{k: (extra or {}).get(k) for k in SETUP}, "ids": [q["id"] for q in questions],
+                 "report": _label(Path(out or RESULTS) / f"{name}.json")}
+        llm = Recorder(llm, CASSETTES / f"{name}.jsonl", anchor, setup)
 
     def factory():
         return make_system(system, uri, llm, anchor), PinnedDB(db.ReadOnlyDB(uri), anchor)
@@ -391,7 +434,8 @@ def compare_scores(a, b):
 
 
 def oracle_shortfall(metrics, questions):
-    """The scores on which an oracle run is below 100% ({} when it is perfect), and its model errors."""
+    """The scores on which an oracle run is below 100% ({} when it is perfect), and its model errors. Schema
+    recall is not gated: it measures the copilot's retriever on the question set, not the harness."""
     kinds = {q["expect"] for q in questions}
     keys = (("strict_ex", "relaxed_ex") if "sql" in kinds else ()) + (("refusal_accuracy",) if "refuse" in kinds else ())
     short = {k: metrics[k] for k in keys if metrics[k] != 100.0}
@@ -400,28 +444,53 @@ def oracle_shortfall(metrics, questions):
     return short
 
 
+def recorded_report(replay, setup):
+    """The JSON report of the run a cassette recorded: the report the cassette names, else
+    eval/results/<cassette name>.json. None when neither exists."""
+    named = Path(setup["report"]) if setup.get("report") else None
+    for p in ((named if named.is_absolute() else ROOT / named) if named else None, RESULTS / f"{Path(replay).stem}.json"):
+        if p is not None and p.exists():
+            return p
+    return None
+
+
 def main(oracle=False, limit=None, ids=None, workers=1, anchor=None, replay=None, allow_personal_codex=False,
-         company=None, system=None, questions=None, out=None):
-    """python -m copilot eval. company, system and questions default to the recorded run's when replaying,
-    else to company A, the copilot and eval/questions.jsonl."""
+         company=None, system=None, questions=None, out=None, poison=False):
+    """python -m copilot eval. Without a replay: company A, the copilot and eval/questions.jsonl unless told
+    otherwise. A replay takes the recorded run's setup (company, system, question file, questions, anchor,
+    poison) from the cassette and its report, refuses to run if the report is missing or the question file has
+    changed, and exits with an error unless every call was answered from the cassette and the scores match."""
     from .doctor import codex_gate
-    recorded = RESULTS / f"{Path(replay).stem}.json" if replay else None
-    recorded = json.loads(recorded.read_text(encoding="utf-8")) if recorded and recorded.exists() else None
-    was = recorded["metrics"] if recorded else {}
-    company = (company or was.get("company") or "A").upper()
-    system = system or was.get("system") or "copilot"
-    qfile = questions_file(questions or was.get("question_file"))
-    if company != "A" and qfile.resolve() == QUESTIONS.resolve():
-        raise SystemExit(f"eval/questions.jsonl is company A's set; give company {company}'s own with --questions.")
-    if recorded and not (ids or limit):                      # a replay asks the questions the recorded run asked
-        ids = [r["id"] for r in recorded["results"]]
-    qs = load_questions(ids, limit, qfile)
-    extra = {"company": company, "question_file": _label(qfile),
-             "question_file_sha256": hashlib.sha256(qfile.read_bytes()).hexdigest()}
-    suffix = ("-baseline" if system == "baseline" else "") + (f"-company-{company.lower()}" if company != "A" else "")
+    was, recorded, llm, report = {}, None, None, None
     if replay:
         from .cassette import Replay
         llm = Replay(replay)
+        report = recorded_report(replay, llm.setup)
+        if report is None:
+            raise SystemExit(f"Cannot find the report of the run recorded in {Path(replay).name} "
+                             f"({llm.setup.get('report') or RESULTS / (Path(replay).stem + '.json')}): "
+                             "a replay is checked against it.")
+        recorded = json.loads(report.read_text(encoding="utf-8"))
+        was = {**recorded["metrics"], **{k: v for k, v in llm.setup.items() if v is not None}}
+    company = (company or was.get("company") or "A").upper()
+    system = system or was.get("system") or "copilot"
+    poison = poison or bool(was.get("poison"))
+    qfile = questions_file(questions or was.get("question_file"))
+    if company != "A" and qfile.resolve() == QUESTIONS.resolve():
+        raise SystemExit(f"eval/questions.jsonl is company A's set; give company {company}'s own with --questions.")
+    sha = hashlib.sha256(qfile.read_bytes()).hexdigest()
+    if replay and was.get("question_file_sha256") and was["question_file_sha256"] != sha:
+        raise SystemExit(f"{_label(qfile)} has changed since the recorded run (sha256 {sha[:12]}..., recorded "
+                         f"{was['question_file_sha256'][:12]}...): a replay needs the same questions.")
+    partial = bool(ids or limit)
+    if recorded and not partial:                             # a replay asks the questions the recorded run asked
+        ids = was.get("ids") or [r["id"] for r in recorded["results"]]
+    qs = load_questions(ids, limit, qfile)
+    extra = {"company": company, "question_file": _label(qfile), "question_file_sha256": sha}
+    if poison:
+        extra["poison"] = True
+    suffix = ("-baseline" if system == "baseline" else "") + (f"-company-{company.lower()}" if company != "A" else "")
+    if replay:
         anchor = anchor or llm.anchor
         extra["replay_of"], suffix = Path(replay).name, suffix + "-replay"
     else:
@@ -432,7 +501,7 @@ def main(oracle=False, limit=None, ids=None, workers=1, anchor=None, replay=None
     anchor = dt.date.fromisoformat(str(anchor or DEFAULT_ANCHOR))
     extra.update(codex_gate(llm, allow_personal_codex))
     try:
-        uri = demo_database(anchor, company=company, baseline=system == "baseline")
+        uri = demo_database(anchor, company=company, baseline=system == "baseline", poison=poison)
         metrics, _, path = run(llm, qs, uri, anchor, workers, record=not (oracle or replay), suffix=suffix,
                                extra=extra, system=system, out=out)
     except GoldError as e:
@@ -440,11 +509,20 @@ def main(oracle=False, limit=None, ids=None, workers=1, anchor=None, replay=None
     print("\n" + json.dumps(metrics, ensure_ascii=False, indent=2))
     print(f"\nWritten: {path} and {path.parent / 'latest.md'}")
     if recorded:
-        diff = compare_scores(recorded["metrics"], metrics)
-        print(f"Replay against {Path(replay).stem}.json: " + ("same scores" if not diff else f"DIFFERENT {diff}"))
+        problems = [f"{llm.missed} model call(s) had no recorded reply"] if llm.missed else []
+        if not partial:
+            diff = compare_scores(recorded["metrics"], metrics)
+            problems += [f"different scores {diff}"] if diff else []
+            problems += [f"{llm.unused()} recorded call(s) were never asked"] if llm.unused() else []
+        verdict = "; ".join(problems) or ("same scores" if not partial else "a partial replay (--ids or --limit): "
+                                                                            "scores not compared")
+        print(f"Replay against {report.name}: {'NOT reproduced: ' if problems else ''}{verdict}")
+        if problems:
+            raise SystemExit(f"The replay did not reproduce {report.name}: {verdict}.")
     if oracle:
         short = oracle_shortfall(metrics, qs)
         if short:
             raise SystemExit(f"The oracle must score 100%, and did not: {short}. The harness is broken.")
-        print("Oracle: 100% on every score.")
+        recall = "n/a" if metrics["schema_recall"] is None else f"{metrics['schema_recall']}%"
+        print(f"Oracle: 100% strict, relaxed and refusal accuracy, no errors (schema recall {recall}, not gated).")
     return metrics

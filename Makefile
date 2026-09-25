@@ -1,5 +1,5 @@
 # make verify: the tests, the oracle (must score 100%) and a rescore of every stored model run.
-# No model and no network beyond the installed packages; a few minutes on a laptop. CI runs the same.
+# No model and no network beyond the installed packages; about 20 seconds on a laptop. CI runs the same.
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 ANCHOR := 2026-10-15
 

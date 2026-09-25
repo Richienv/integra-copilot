@@ -5,7 +5,9 @@
 --
 -- It can read Integra's base tables, including the personal data the copilot's views leave out (salaries,
 -- BPJS and NPWP numbers, phone numbers, e-mails, bank accounts): that is the comparison. It cannot read
--- the copilot schema, every transaction is read-only, and every statement stops after 5 seconds.
+-- the copilot schema, and copilot.db.ReadOnlyDB runs each of its statements in a read-only transaction with a
+-- 5-second timeout. There is no guard in front of it, so, as for copilot_reader without the guard, a statement
+-- that smuggles in its own SET can lift that timeout, and the role can read the system catalogue.
 -- Never create this role on a database with real people's data.
 
 do $$ begin

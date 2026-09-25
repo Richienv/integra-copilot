@@ -1,10 +1,10 @@
 """The red-team sandbox: a throwaway database for replaying attacks without the L3 lock.
 
 Attacks replayed without the read-only role (stacks L1 and L1+L2) run here, as the role redteam_sandbox:
-a login role that is NOSUPERUSER, NOCREATEDB, NOCREATEROLE and not a member of pg_execute_server_program,
-pg_read_server_files, pg_write_server_files or pg_signal_backend. Before executing anything, assert_safe_role
-checks the connected role has none of those powers, and refuses otherwise, so nothing replayed ever runs as
-the postgres superuser.
+a login role that is NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION and NOBYPASSRLS, has no session
+defaults but its statement timeout, and is a member of no other role. Before executing anything,
+assert_safe_role checks that neither the connected role nor any role it can SET ROLE to has one of those
+powers or is a privileged built-in role, and refuses otherwise, so nothing replayed ever runs as a superuser.
 
 The database is throwaway: redteam_sandbox owns its data, so an unguarded write really takes effect, inside a
 transaction the harness rolls back after the result is captured. A statement that ends that transaction itself
@@ -28,8 +28,6 @@ SQL_DIR = ROOT / "sql"
 
 SANDBOX_ROLE = "redteam_sandbox"
 SANDBOX_DB = "redteam"
-DANGEROUS_ROLES = ("pg_execute_server_program", "pg_read_server_files", "pg_write_server_files",
-                   "pg_signal_backend")
 
 
 class SandboxError(RuntimeError):
@@ -37,20 +35,21 @@ class SandboxError(RuntimeError):
 
 
 def assert_safe_role(conn):
-    """Refuse if the connected role is a superuser, can create databases or roles, or is a member of a
-    privileged built-in role."""
-    user, superuser, createdb, createrole = conn.execute(
-        "select current_user, rolsuper, rolcreatedb, rolcreaterole from pg_roles where rolname = current_user"
-    ).fetchone()
-    if superuser or conn.execute("select current_setting('is_superuser')").fetchone()[0] == "on":
+    """Refuse if the connected role, or any role it is a member of (and so can SET ROLE to), is a superuser,
+    can create databases or roles, can replicate or bypass row security, or is a built-in pg_* role. The one
+    built-in role allowed is pg_database_owner, which the owner of the throwaway database always is."""
+    user = conn.execute("select current_user").fetchone()[0]
+    if conn.execute("select current_setting('is_superuser')").fetchone()[0] == "on":
         raise SandboxError(f"refusing to run: {user} is a superuser")
-    if createdb or createrole:
-        raise SandboxError(f"refusing to run: {user} can create databases or roles")
-    bad = conn.execute("select rolname from pg_roles where rolname = any(%s) "
-                       "and pg_has_role(current_user, oid, 'MEMBER')",
-                       (list(DANGEROUS_ROLES),)).fetchall()
-    if bad:
-        raise SandboxError(f"refusing to run: {user} is a member of {[b[0] for b in bad]}")
+    for name, superuser, creates, special in conn.execute(
+            "select rolname, rolsuper, rolcreatedb or rolcreaterole, rolreplication or rolbypassrls from pg_roles "
+            "where pg_has_role(current_user, oid, 'MEMBER') and (rolsuper or rolcreatedb or rolcreaterole "
+            "or rolreplication or rolbypassrls or (rolname like 'pg\\_%' and rolname <> 'pg_database_owner')) "
+            "order by rolsuper desc, rolname"):
+        what = ("is a superuser" if superuser else "can create databases or roles" if creates
+                else "can replicate or bypass row security" if special else "is a privileged built-in role")
+        raise SandboxError(f"refusing to run: {user} {what}" if name == user else
+                           f"refusing to run: {user} is a member of {name}, which {what}")
 
 
 @dataclass

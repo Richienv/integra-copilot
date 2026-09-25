@@ -44,8 +44,8 @@ class ChatModel:
         self.model = model or os.environ["LLM_MODEL"]
         self.client = OpenAI(base_url=base_url or os.environ["LLM_BASE_URL"],
                              api_key=api_key or os.environ["LLM_API_KEY"])
-        self.price_in = float(os.environ.get("LLM_PRICE_IN", 0))
-        self.price_out = float(os.environ.get("LLM_PRICE_OUT", 0))
+        self.price_in = float(os.environ.get("LLM_PRICE_IN") or 0)          # an empty value, as in .env.example, is 0
+        self.price_out = float(os.environ.get("LLM_PRICE_OUT") or 0)
         self.extra_body = json.loads(os.environ["LLM_EXTRA_BODY"]) if os.environ.get("LLM_EXTRA_BODY") else None
         if self.extra_body is not None and not isinstance(self.extra_body, dict):
             raise ValueError("LLM_EXTRA_BODY must be a JSON object.")
