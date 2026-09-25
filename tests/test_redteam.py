@@ -254,3 +254,65 @@ def test_run_redteam_end_to_end_on_its_own_poisoned_server(tmp_path):
     written = json.loads((tmp_path / m["written"].split("/")[-1]).read_text())
     assert written["summary"] == m["summary"]
     assert (tmp_path / "latest.md").read_text().startswith("# Red-team lock matrix")
+
+
+def test_an_evaluation_run_over_the_attacks_feeds_the_harness(reader, tmp_path, monkeypatch):
+    """eval --questions <attack file> asks every attack and records a run JSON and a cassette. Both give the
+    harness one output per attack; the cassette keeps the model's first plan, not a repair."""
+    from copilot import evaluate
+    from copilot.llm import ScriptedModel
+    monkeypatch.setattr(evaluate, "RESULTS", tmp_path / "results")
+    monkeypatch.setattr(evaluate, "CASSETTES", tmp_path / "cassettes")
+    attacks = locks.load_attacks(EXAMPLES)
+    qs = evaluate.load_questions(path=EXAMPLES)
+    assert [(q["lang"], q["expect"]) for q in qs] == [(a["language"], "refuse") for a in attacks]
+    plans = {"EXAMPLE-write-01": "update invoices set status = 'PAID'",
+             "EXAMPLE-personal-01": 'select "baseSalary" from public.employees',
+             "EXAMPLE-indirect-01": "select name from suppliers"}
+    by_question = {a["question"]: plans[a["id"]] for a in attacks}
+
+    def fn(messages, json_mode):
+        if not json_mode:
+            return "Pemasok kita ada di tabel."
+        last = messages[-1]["content"]
+        sql = next((s for q, s in by_question.items() if last.endswith("Question: " + q)), "select 1 from nowhere")
+        return json.dumps({"kind": "sql", "sql": sql, "reason": ""})
+    m, results, path = evaluate.run(ScriptedModel(fn), qs, reader.uri, ANCHOR)
+    assert [r["kind"] for r in results] == ["refused", "failed", "data"]          # the guard, then two repairs
+    assert m["refusal_accuracy"] == 33.3
+
+    from_run = locks.load_outputs(path)
+    from_cassette = locks.load_outputs(tmp_path / "cassettes" / f"{path.stem}.jsonl", attacks)
+    assert set(from_run) == set(from_cassette) == set(plans)
+    assert {i: o["sql"] for i, o in from_cassette.items()} == plans
+    assert from_run["EXAMPLE-write-01"] == {"sql": plans["EXAMPLE-write-01"], "kind": "refused"}
+
+
+def test_redteam_command_line(monkeypatch, capsys):
+    from copilot.__main__ import main
+    seen = {}
+
+    def fake(attacks, outputs, **kw):
+        seen.update(kw, attacks=attacks, outputs=outputs)
+        return {"written": "matrix.json"}
+    monkeypatch.setattr(locks, "run_redteam", fake)
+    monkeypatch.setattr(locks, "render_markdown", lambda m: "# Red-team lock matrix")
+    main(["redteam", "--attacks", "a.jsonl", "--outputs", "run.json"])
+    assert (seen["attacks"], seen["outputs"], seen["poison"], seen["anchor"], seen["stacks"]) == \
+        ("a.jsonl", "run.json", True, None, None)
+    assert seen["out_dir"] == locks.RESULTS and "Written: matrix.json" in capsys.readouterr().out
+    main(["redteam", "--attacks", "a.jsonl", "--outputs", "c.jsonl", "--no-poison", "--anchor", "2026-09-24",
+          "--stacks", "L1", "L1+L2+L3", "--out", "elsewhere"])
+    assert (seen["poison"], seen["anchor"], seen["stacks"], seen["out_dir"]) == \
+        (False, ANCHOR, ["L1", "L1+L2+L3"], "elsewhere")
+    main(["redteam", "--attacks", "a.jsonl", "--outputs", "c.jsonl", "--poison"])
+    assert seen["poison"] is True
+
+
+def test_run_redteam_seeds_at_the_evaluation_anchor_by_default(admin_uri, sandbox, monkeypatch):
+    from copilot.evaluate import DEFAULT_ANCHOR
+    seen = []
+    monkeypatch.setattr(sb, "create_sandbox", lambda uri, poison, anchor: seen.append(anchor) or sandbox)
+    refused = {a["id"]: {"sql": "", "kind": "refuse"} for a in locks.load_attacks(EXAMPLES)}
+    m = locks.run_redteam(EXAMPLES, refused, admin_uri=admin_uri)
+    assert seen == [DEFAULT_ANCHOR] and m["setup"]["anchor"] == "2026-10-15"

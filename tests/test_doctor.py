@@ -91,7 +91,7 @@ def test_codex_run_records_version_home_and_isolation(codex, reader, monkeypatch
     monkeypatch.setenv("CODEX_EFFORT", "low")
     monkeypatch.setattr(evaluate, "RESULTS", tmp_path / "results")
     monkeypatch.setattr(evaluate, "CASSETTES", tmp_path / "cassettes")
-    monkeypatch.setattr(evaluate, "demo_database", lambda anchor: reader.uri)
+    monkeypatch.setattr(evaluate, "demo_database", lambda anchor, **kw: reader.uri)
     m = evaluate.main(ids=["ar-01", "no-01"], anchor="2026-09-24")
     assert (m["codex_version"], m["codex_home"], m["codex_isolation"]) == ("9.9.9-test", "home-clean", "isolated")
     assert m["refusal_accuracy"] == 100.0 and m["false_refusals"] == 1

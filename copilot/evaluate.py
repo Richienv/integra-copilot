@@ -19,6 +19,10 @@ compared with the reference result.
     python -m copilot eval --anchor 2026-09-24                    # another anchor day
     python -m copilot eval --replay eval/cassettes/RUN.jsonl      # answer every model call from a recording
                                                                   # (the recorded run's questions and anchor)
+    python -m copilot eval --system baseline   # the naive zero-shot baseline (copilot/baseline.py) instead
+    python -m copilot eval --company B --questions FILE           # company B, with its own question file
+
+The oracle must score 100%: an oracle run below that exits with an error, because the harness is broken.
 
 Every scored record keeps the row counts and a sha256 of the sorted result rows (gold and predicted), the
 steps and the summary. Every model call is recorded in eval/cassettes/<run name>.jsonl (copilot/cassette.py),
@@ -37,7 +41,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import db, guard
-from .agent import Copilot
 from .dates import PinnedDB
 from .llm import ScriptedModel, from_env
 
@@ -49,8 +52,30 @@ DEFAULT_ANCHOR = dt.date(2026, 10, 15)         # mid-month, so "this month" neve
 SCORES = ("strict_ex", "relaxed_ex", "refusal_accuracy", "schema_recall")
 
 
-def load_questions(ids=None, limit=None):
-    qs = [json.loads(l) for l in QUESTIONS.read_text(encoding="utf-8").splitlines() if l.strip()]
+def questions_file(path=None):
+    """The question file: eval/questions.jsonl by default; a relative path is looked up from the current folder,
+    then from the repository."""
+    p = Path(path or QUESTIONS)
+    return p if p.is_absolute() or p.exists() else ROOT / p
+
+
+def _label(path):
+    """A path as a run records it: relative to the repository when inside it."""
+    p = Path(path).resolve()
+    return p.relative_to(ROOT).as_posix() if p.is_relative_to(ROOT) else str(p)
+
+
+def _question(q):
+    """One question as the evaluation reads it. A red-team attack (eval/redteam/) names its language `language`
+    and has no `expect`: it counts as a question to refuse."""
+    q.setdefault("lang", q.get("language", ""))
+    q.setdefault("expect", "refuse")
+    return q
+
+
+def load_questions(ids=None, limit=None, path=None):
+    text = questions_file(path).read_text(encoding="utf-8")
+    qs = [_question(json.loads(l)) for l in text.splitlines() if l.strip()]
     if ids:
         qs = [q for q in qs if q["id"] in set(ids)]
     return qs[:limit] if limit else qs
@@ -267,8 +292,11 @@ def summarise(results, model, anchor, note=""):
 def render_report(metrics, results):
     """The Markdown report for one run."""
     lines = [f"# Evaluation · {metrics['model']} · {metrics['date']}", "",
-             f"Demo data seeded at, and today's date pinned to, {metrics.get('anchor', metrics['date'])}.", "",
-             "| Metric | Result |", "|---|---|"]
+             f"Demo data seeded at, and today's date pinned to, {metrics.get('anchor', metrics['date'])}.", ""]
+    if metrics.get("system"):
+        lines += [f"System: {metrics['system']} · company {metrics.get('company', 'A')} · "
+                  f"questions `{metrics.get('question_file', 'eval/questions.jsonl')}`", ""]
+    lines += ["| Metric | Result |", "|---|---|"]
     labels = [("strict_ex", "Strict execution accuracy (%)"), ("relaxed_ex", "Relaxed execution accuracy (%)"),
               ("refusal_accuracy", "Refusal accuracy (%)"), ("false_refusals", "False refusals"),
               ("errors", "Model errors (counted as misses)"),
@@ -293,43 +321,52 @@ def render_report(metrics, results):
     return "\n".join(lines) + "\n"
 
 
-def run_name(model, suffix=""):
+def run_name(model, suffix="", out=None):
     """<date>-<time>-<model>, unique among the reports and cassettes already written."""
+    out = Path(out or RESULTS)
     base = f"{dt.datetime.now():%Y%m%d-%H%M}-{str(model).replace('/', '_')}{suffix}"
     name, n = base, 1
-    while (RESULTS / f"{name}.json").exists() or (CASSETTES / f"{name}.jsonl").exists():
+    while (out / f"{name}.json").exists() or (CASSETTES / f"{name}.jsonl").exists():
         n += 1
         name = f"{base}-{n}"
     return name
 
 
-def write_report(metrics, results, name=None):
-    """Every run keeps its own JSON and Markdown report; latest.md is a copy of the newest one."""
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    name = name or run_name(metrics["model"])
-    (RESULTS / f"{name}.json").write_text(json.dumps({"metrics": metrics, "results": results}, ensure_ascii=False, indent=2,
-                                                     default=str), encoding="utf-8")
+def write_report(metrics, results, name=None, out=None):
+    """Every run keeps its own JSON and Markdown report; latest.md is a copy of the newest one.
+    out is the folder, eval/results by default."""
+    out = Path(out or RESULTS)
+    out.mkdir(parents=True, exist_ok=True)
+    name = name or run_name(metrics["model"], out=out)
+    (out / f"{name}.json").write_text(json.dumps({"metrics": metrics, "results": results}, ensure_ascii=False, indent=2,
+                                                 default=str), encoding="utf-8")
     report = render_report(metrics, results)
-    (RESULTS / f"{name}.md").write_text(report, encoding="utf-8")
-    (RESULTS / "latest.md").write_text(report, encoding="utf-8")
-    return RESULTS / f"{name}.json"
+    (out / f"{name}.md").write_text(report, encoding="utf-8")
+    (out / "latest.md").write_text(report, encoding="utf-8")
+    return out / f"{name}.json"
 
 
-def demo_database(anchor):
-    """A fresh private PostgreSQL with demo data seeded at the anchor day. Returns the reader's URI."""
-    admin = db.local_server(tempfile.mkdtemp(prefix="copilot-eval-"), cleanup_mode="delete")
-    db.create_demo(admin, dt.date.fromisoformat(str(anchor)))
+def demo_database(anchor, company="A", baseline=False):
+    """A fresh private PostgreSQL with one demo company seeded at the anchor day. Returns the reader's URI.
+    With baseline, the naive baseline's own role is created too (sql/03_baseline_reader.sql)."""
+    admin = db.demo_database(db.local_server(tempfile.mkdtemp(prefix="copilot-eval-"), cleanup_mode="delete"), company)
+    db.create_demo(admin, dt.date.fromisoformat(str(anchor)), company)
+    if baseline:
+        from .baseline_db import create_role
+        create_role(admin)
     return db.reader_uri(admin)
 
 
-def run(llm, questions, uri, anchor, workers=1, record=True, suffix="", extra=None):
+def run(llm, questions, uri, anchor, workers=1, record=True, suffix="", extra=None, system="copilot", out=None):
     """One evaluation run on the demo database at uri, which must be seeded at the anchor day.
 
+    system is "copilot" (the agent) or "baseline" (copilot/baseline.py; its role must exist on that database).
     Every query runs with its dates pinned to the anchor. The reference answers are checked before any model
-    call. With record=True every model call is appended to eval/cassettes/<run name>.jsonl.
-    Returns (metrics, results, path of the JSON report)."""
+    call. With record=True every model call is appended to eval/cassettes/<run name>.jsonl. The reports go to
+    out (eval/results by default). Returns (metrics, results, path of the JSON report)."""
+    from .baseline import make_system
     anchor = dt.date.fromisoformat(str(anchor))
-    name = run_name(llm.model, suffix)
+    name = run_name(llm.model, suffix, out)
     reader = PinnedDB(db.ReadOnlyDB(uri), anchor)
     gold = validate_gold(reader, questions)
     if record:
@@ -337,14 +374,14 @@ def run(llm, questions, uri, anchor, workers=1, record=True, suffix="", extra=No
         llm = Recorder(llm, CASSETTES / f"{name}.jsonl", anchor)
 
     def factory():
-        r = PinnedDB(db.ReadOnlyDB(uri), anchor)
-        return Copilot(r, llm), r
-    results = evaluate(Copilot(reader, llm), reader, questions, workers, factory, gold)
+        return make_system(system, uri, llm, anchor), PinnedDB(db.ReadOnlyDB(uri), anchor)
+    results = evaluate(make_system(system, uri, llm, anchor), reader, questions, workers, factory, gold)
     metrics = summarise(results, llm.model, anchor, getattr(llm, "note", ""))
+    metrics["system"] = system
     metrics.update(extra or {})
     if record:
         metrics["cassette"] = f"eval/cassettes/{name}.jsonl"
-    path = write_report(metrics, results, name)
+    path = write_report(metrics, results, name, out)
     return metrics, results, path
 
 
@@ -353,34 +390,61 @@ def compare_scores(a, b):
     return {k: (a.get(k), b.get(k)) for k in SCORES if a.get(k) != b.get(k)}
 
 
-def main(oracle=False, limit=None, ids=None, workers=1, anchor=None, replay=None, allow_personal_codex=False):
+def oracle_shortfall(metrics, questions):
+    """The scores on which an oracle run is below 100% ({} when it is perfect), and its model errors."""
+    kinds = {q["expect"] for q in questions}
+    keys = (("strict_ex", "relaxed_ex") if "sql" in kinds else ()) + (("refusal_accuracy",) if "refuse" in kinds else ())
+    short = {k: metrics[k] for k in keys if metrics[k] != 100.0}
+    if metrics["errors"]:
+        short["errors"] = metrics["errors"]
+    return short
+
+
+def main(oracle=False, limit=None, ids=None, workers=1, anchor=None, replay=None, allow_personal_codex=False,
+         company=None, system=None, questions=None, out=None):
+    """python -m copilot eval. company, system and questions default to the recorded run's when replaying,
+    else to company A, the copilot and eval/questions.jsonl."""
     from .doctor import codex_gate
     recorded = RESULTS / f"{Path(replay).stem}.json" if replay else None
     recorded = json.loads(recorded.read_text(encoding="utf-8")) if recorded and recorded.exists() else None
+    was = recorded["metrics"] if recorded else {}
+    company = (company or was.get("company") or "A").upper()
+    system = system or was.get("system") or "copilot"
+    qfile = questions_file(questions or was.get("question_file"))
+    if company != "A" and qfile.resolve() == QUESTIONS.resolve():
+        raise SystemExit(f"eval/questions.jsonl is company A's set; give company {company}'s own with --questions.")
     if recorded and not (ids or limit):                      # a replay asks the questions the recorded run asked
         ids = [r["id"] for r in recorded["results"]]
-    questions = load_questions(ids, limit)
-    extra, suffix = {}, ""
+    qs = load_questions(ids, limit, qfile)
+    extra = {"company": company, "question_file": _label(qfile),
+             "question_file_sha256": hashlib.sha256(qfile.read_bytes()).hexdigest()}
+    suffix = ("-baseline" if system == "baseline" else "") + (f"-company-{company.lower()}" if company != "A" else "")
     if replay:
         from .cassette import Replay
         llm = Replay(replay)
         anchor = anchor or llm.anchor
-        extra, suffix = {"replay_of": Path(replay).name}, "-replay"
+        extra["replay_of"], suffix = Path(replay).name, suffix + "-replay"
     else:
-        llm = oracle_model(questions) if oracle else from_env()
+        llm = oracle_model(qs) if oracle else from_env()
     if llm is None:
         raise SystemExit("No model: set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL, or LLM_BACKEND=codex with the "
                          "ChatGPT app signed in, or run with --oracle to test the harness.")
     anchor = dt.date.fromisoformat(str(anchor or DEFAULT_ANCHOR))
     extra.update(codex_gate(llm, allow_personal_codex))
     try:
-        metrics, _, path = run(llm, questions, demo_database(anchor), anchor, workers,
-                               record=not (oracle or replay), suffix=suffix, extra=extra)
+        uri = demo_database(anchor, company=company, baseline=system == "baseline")
+        metrics, _, path = run(llm, qs, uri, anchor, workers, record=not (oracle or replay), suffix=suffix,
+                               extra=extra, system=system, out=out)
     except GoldError as e:
         raise SystemExit(str(e))
     print("\n" + json.dumps(metrics, ensure_ascii=False, indent=2))
-    print(f"\nWritten: {path} and {RESULTS / 'latest.md'}")
+    print(f"\nWritten: {path} and {path.parent / 'latest.md'}")
     if recorded:
         diff = compare_scores(recorded["metrics"], metrics)
         print(f"Replay against {Path(replay).stem}.json: " + ("same scores" if not diff else f"DIFFERENT {diff}"))
+    if oracle:
+        short = oracle_shortfall(metrics, qs)
+        if short:
+            raise SystemExit(f"The oracle must score 100%, and did not: {short}. The harness is broken.")
+        print("Oracle: 100% on every score.")
     return metrics

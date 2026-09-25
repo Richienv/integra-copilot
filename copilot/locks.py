@@ -360,11 +360,25 @@ def load_attacks(path):
     return [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def load_outputs(path):
+def _plans_by_attack(calls, attacks):
+    """An evaluation cassette (copilot/cassette.py) records calls, not ids: a plan call is the one whose last
+    message ends with "Question: <the attack's question>". Returns [{id, response}], in the recorded order;
+    a repair, a retry or a summary call matches no attack."""
+    out = []
+    for c in calls:
+        last = (c.get("messages") or [{}])[-1].get("content", "")
+        hit = next((a["id"] for a in attacks or [] if last.endswith("Question: " + a["question"])), None)
+        if c.get("json_mode") and hit and c.get("response") is not None:
+            out.append({"id": hit, "response": c["response"]})
+    return out
+
+
+def load_outputs(path, attacks=None):
     """Read recorded model outputs from a run JSON (eval/results/*.json) or a JSONL cassette.
 
     A run JSON has a "results" list of records with id/sql/kind. A cassette has one record per line: an id and
-    either sql/kind, or the model's plan under "plan" (the JSON object) or "response" (its raw reply).
+    either sql/kind, or the model's plan under "plan" (the JSON object) or "response" (its raw reply). An
+    evaluation cassette (eval/cassettes/*.jsonl) has no ids: its plan calls are matched to `attacks` by question.
     """
     text = Path(path).read_text(encoding="utf-8")
     try:
@@ -376,6 +390,8 @@ def load_outputs(path):
             data = data["results"]                                          # a run JSON
         elif "id" in data:
             data = [data]                                                   # one record
+    if data and "id" not in data[0] and "messages" in data[0]:
+        data = _plans_by_attack(data, attacks)                              # an evaluation cassette
     return _normalise(data)
 
 
@@ -387,13 +403,15 @@ def run_redteam(attacks, outputs, admin_uri=None, poison=True, anchor=None, out_
     admin_uri : an admin connection to a server that already holds the demo database. If omitted, a private
               server is started for this run and its demo database gets the same (poisoned) rows as the
               sandbox, so all four stacks see the same data.
+    anchor : the day the demo data is seeded at; the evaluation's default anchor, 2026-10-15, if omitted.
     poison : plant the canary strings of data/poison.py.
     out_dir : where to write the JSON and Markdown reports; if omitted, nothing is written.
     """
     from . import db
+    from .evaluate import DEFAULT_ANCHOR
     from .sandbox import create_sandbox, demo_tables, load_demo
 
-    anchor = anchor or dt.date.today()
+    anchor = anchor or DEFAULT_ANCHOR
     own_server = admin_uri is None
     if own_server:
         admin_uri = db.local_server(tempfile.mkdtemp(prefix="copilot-redteam-"), cleanup_mode="delete")
@@ -402,7 +420,7 @@ def run_redteam(attacks, outputs, admin_uri=None, poison=True, anchor=None, out_
     sandbox = create_sandbox(admin_uri, poison=poison, anchor=anchor)
 
     attacks = load_attacks(attacks) if isinstance(attacks, (str, Path)) else attacks
-    outputs = load_outputs(outputs) if isinstance(outputs, (str, Path)) else outputs
+    outputs = load_outputs(outputs, attacks) if isinstance(outputs, (str, Path)) else outputs
     matrix = replay(outputs, sandbox, reader, attacks=attacks, stacks=stacks)
     matrix["setup"] = {"anchor": str(anchor), "poisoned sandbox": poison,
                        "poisoned demo database": own_server and poison}

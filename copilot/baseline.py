@@ -22,6 +22,7 @@ from dataclasses import asdict
 
 from . import baseline_db, db
 from .agent import TEMPLATES, Answer, Copilot, Step
+from .dates import PinnedDB
 from .grounding import detect_language
 from .llm import Usage
 
@@ -57,28 +58,20 @@ def parse_sql(text):
     return str(reply["sql"] or "").strip()
 
 
-class _NoRetrieval:
-    """The baseline retrieves no views. evaluate.score asks for them when a model call fails."""
-
-    def retrieve(self, question, k):
-        return []
-
-
 class NaiveBaseline:
-    """Zero-shot text-to-SQL over the raw base tables. ask() returns an agent.Answer, like Copilot.ask()."""
-    k = 0
+    """Zero-shot text-to-SQL over the raw base tables. ask() returns an agent.Answer, like Copilot.ask().
+    It retrieves no views, so its answers carry views=None and the evaluation shows schema recall as n/a."""
 
     def __init__(self, db, llm):
         self.db, self.llm = db, llm
         self.prompt = PROMPT.format(ddl=base_ddl())
-        self.retriever = _NoRetrieval()
 
     def ask(self, question):
         t0 = time.perf_counter()
         usage, steps, lang = Usage(), [], detect_language(question)
 
         def done(kind, summary, **kw):
-            return Answer(question, lang, kind, summary, steps=[asdict(s) for s in steps],
+            return Answer(question, lang, kind, summary, views=None, steps=[asdict(s) for s in steps],
                           usage={**asdict(usage), "cost": round(self.llm.cost(usage), 6)},
                           ms=round((time.perf_counter() - t0) * 1000, 1), **kw)
 
@@ -102,12 +95,15 @@ class NaiveBaseline:
         return done("data", summary, sql=sql, columns=result.columns, rows=result.rows, truncated=result.truncated)
 
 
-def make_system(name, reader_uri, llm):
+def make_system(name, reader_uri, llm, anchor=None):
     """A system the evaluation can score, by name. reader_uri is copilot_reader's URI on a demo database.
     "copilot" is the agent itself; "baseline" is NaiveBaseline as baseline_reader on the same server
-    (create that role first, with baseline_db.create_role)."""
+    (create that role first, with baseline_db.create_role). With an anchor, the system's queries run with
+    today's date pinned to that day, as in evaluation."""
+    def reader(uri):
+        return PinnedDB(db.ReadOnlyDB(uri), anchor) if anchor else db.ReadOnlyDB(uri)
     if name == "copilot":
-        return Copilot(db.ReadOnlyDB(reader_uri), llm)
+        return Copilot(reader(reader_uri), llm)
     if name == "baseline":
-        return NaiveBaseline(db.ReadOnlyDB(baseline_db.baseline_uri(reader_uri)), llm)
+        return NaiveBaseline(reader(baseline_db.baseline_uri(reader_uri)), llm)
     raise ValueError(f"unknown system {name!r}: choose one of {', '.join(SYSTEMS)}")

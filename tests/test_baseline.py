@@ -53,7 +53,7 @@ def test_correct_answer_on_base_tables(baseline_reader, reader):
     m = replies(AR_01)
     a = NaiveBaseline(baseline_reader, m).ask("Berapa total piutang yang belum dibayar saat ini?")
     assert a.kind == "data" and a.sql == AR_01 and a.language == "id" and len(m.calls) == 1
-    assert a.views == [] and a.citations == [] and a.repairs == 0 and a.grounded
+    assert a.views is None and a.citations == [] and a.repairs == 0 and a.grounded      # no views retrieved
     gold = reader.run("select sum(balance_due) from invoices where direction = 'receivable' and balance_due > 0 "
                       "and status not in ('DRAFT', 'CANCELLED', 'VOID')")
     assert a.rows == gold.rows and a.rows[0][0] > 0
@@ -152,4 +152,27 @@ def test_a_model_error_is_a_miss_in_the_evaluation(baseline_reader, reader):
             return 0.0
     q = evaluate.load_questions()[0]
     rec = evaluate.score(NaiveBaseline(baseline_reader, Broken()), reader, q)
-    assert rec["kind"] == "error" and rec["relaxed"] is False and rec["views"] == []
+    assert rec["kind"] == "error" and rec["relaxed"] is False and rec["views"] is None and rec["schema_recall"] is None
+
+
+def test_a_baseline_run_is_pinned_recorded_and_rescored_as_it_ran(baseline_reader, reader, tmp_path, monkeypatch):
+    """eval --system baseline: the baseline's own SQL runs with the date pinned, the run says which system it
+    was, schema recall is n/a, and rescore reruns that SQL unguarded as baseline_reader, as in the run."""
+    from copilot import rescore
+    monkeypatch.setattr(evaluate, "RESULTS", tmp_path / "results")
+    monkeypatch.setattr(evaluate, "CASSETTES", tmp_path / "cassettes")
+    today = {"id": "t-today", "lang": "en", "question": "What is the date today?", "expect": "sql", "ordered": False,
+             "gold_sql": "SELECT CURRENT_DATE"}
+    qs = [today] + [q for q in evaluate.load_questions() if q["id"] in ("ar-01", "no-07")]
+    plans = {"t-today": "select current_date", "ar-01": AR_01, "no-07": ""}
+    sql_for = {f"Question: {q['question']}": plans[q["id"]] for q in qs}
+    m = ScriptedModel(lambda messages, json_mode: json.dumps({"sql": sql_for[messages[-1]["content"]]}))
+    metrics, results, path = evaluate.run(m, qs, reader.uri, "2001-02-03", system="baseline")
+    assert metrics["system"] == "baseline" and metrics["schema_recall"] is None
+    assert metrics["strict_ex"] == 100.0 and metrics["refusal_accuracy"] == 100.0
+    assert results[1]["sql"] == AR_01                                     # stored as the model wrote it
+    assert results[0]["pred_hash"] == evaluate.rows_hash([["2001-02-03"]])
+
+    r = rescore.rescore(path, reader, qs)
+    assert evaluate.compare_scores(r["stored"], r["recomputed"]) == {} and r["changes"] == []
+    assert r["results"][1]["pred_rows"] == 1 and "rescore_error" not in r["results"][1]

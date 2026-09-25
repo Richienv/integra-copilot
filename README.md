@@ -84,16 +84,16 @@ in `~/.cache/integra-copilot/pg` (set `COPILOT_DATA_DIR` to move it; the path mu
 ```bash
 uv venv -p 3.12 .venv && source .venv/bin/activate
 uv pip install -r requirements.txt
-python -m pytest -q                         # 93 tests, no API key needed
+make verify                                 # 165 tests, the oracle, runs 1-3 rescored; no API key needed
 cp .env.example .env                        # add your model API key, then:
 set -a && source .env && set +a
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
 python -m copilot serve                     # web page on http://127.0.0.1:8000
 ```
 
-A second fictional company, kept for a blind test, makes batik, knitwear and uniforms in Central and East Java.
-`python -m copilot init-db --company B` builds it in its own database, and `COPILOT_COMPANY=B` makes the other
-commands use it.
+A second fictional company, kept for a [blind test](#company-b-and-the-blind-test), makes batik, knitwear and
+uniforms across Java. `python -m copilot init-db --company B` builds it in its own database, and
+`COPILOT_COMPANY=B` makes the other commands use it.
 
 Without any model, `python -m copilot sql "select ..."`, the SQL console on the web page and the MCP tools
 still work.
@@ -116,10 +116,8 @@ Token counts for this backend are estimates of the copilot's own prompts; cost s
 billed to the ChatGPT plan.
 
 Codex also adds your own instructions to every call: the `AGENTS.md` in your Codex home (`~/.codex` unless
-`CODEX_HOME` says otherwise). An evaluation must not carry them, so `python -m copilot eval` with Codex refuses
-to run from a home that has them, unless `--allow-personal-codex` is given. `python -m copilot doctor` checks
-the home and the prompt Codex renders for it (`codex debug prompt-input`: local, no model call). Each run records
-the Codex version, the home's folder name and whether it was isolated.
+`CODEX_HOME` says otherwise). An evaluation must not carry them, so it refuses to run from such a home; see
+Codex isolation under [How the evaluation stays honest](#how-the-evaluation-stays-honest).
 
 ### Use it from Claude Code (MCP)
 
@@ -148,12 +146,7 @@ export COPILOT_DATABASE_URL="postgresql://copilot_reader:...@your-host:5432/post
 (14) and Chinese (10), and 9 that must be refused (writes, salary and ID requests, a prompt injection,
 off-topic questions).
 
-Each run builds a fresh demo database seeded at a fixed anchor day, 15 October 2026 unless `--anchor` says
-otherwise, and pins today's date to that day in both the reference SQL and the model's SQL: `CURRENT_DATE`,
-`NOW()` and the other clock functions become literals after the guard and before execution (`copilot/dates.py`).
-A run means the same thing on any day it is repeated, and the mid-month anchor keeps "this month" from covering
-a single day. Before any model call, every reference query must return rows with values at the anchor; if one is
-empty or all NULL, the run stops and names it. Then result tables are compared:
+Each run compares the result tables of the answer and the reference query:
 
 | Metric | Meaning |
 |---|---|
@@ -161,7 +154,7 @@ empty or all NULL, the run stops and names it. Then result tables are compared:
 | Relaxed execution accuracy | every reference column present; extra columns allowed |
 | Refusal accuracy | the 9 unsafe or off-topic questions refused |
 | False refusals | answerable questions refused |
-| Schema recall | the views the reference query needs were retrieved |
+| Schema recall | the views the reference query needs were retrieved (n/a for a system that retrieves none) |
 | Latency, tokens, cost | per question |
 
 ```bash
@@ -170,23 +163,48 @@ python -m copilot eval --workers 4      # the real run with your model; writes e
 python -m copilot check-gold --anchor 2026-09-24   # does every reference query return values on that day?
 ```
 
-### Replay and rescore, without a model
+### How the evaluation stays honest
 
-Every scored question keeps its steps, its summary, and for both the reference and the answer the row count and
-a sha256 of the sorted result rows. Every model call is appended to `eval/cassettes/<run>.jsonl` with its UTC
-time, backend, model, reasoning effort, Codex version, the sha256 of the messages, the messages, the reply and
-the token counts.
+**Pinned dates.** Each run builds a fresh demo database seeded at a fixed anchor day, 15 October 2026 unless
+`--anchor` says otherwise, and pins today's date to that day in both the reference SQL and the model's SQL:
+`CURRENT_DATE`, `NOW()` and the other clock functions become literals after the guard and before execution
+(`copilot/dates.py`). A run means the same thing on any day it is repeated, and the mid-month anchor keeps
+"this month" from covering a single day.
+
+**Reference answers first.** Before any model call, every reference query must return rows with values at the
+anchor; if one is empty or all NULL, the run stops and names it. An oracle run below 100% exits with an error.
+
+**Cassettes and replay.** Every scored question keeps its steps, its summary, and for both the reference and the
+answer the row count and a sha256 of the sorted result rows. Every model call is appended to
+`eval/cassettes/<run>.jsonl` with its UTC time, backend, model, reasoning effort, Codex version, the sha256 of the
+messages, the messages, the reply and the token counts. A replay answers every call from the recording and calls
+no model; it asks the recorded run's questions at its anchor and, with the same code, reproduces its scores
+exactly (cost shows zero: a replay spends nothing).
+
+**Rescoring.** Rescoring seeds a demo database at the run's anchor, for the run's company, question file and
+system, reruns the model's stored SQL and the reference SQL with the date pinned, recomputes strict, relaxed,
+refusal and schema-recall scores and prints them next to the stored ones. It exits with an error if any stored
+score is not reproduced.
 
 ```bash
 python -m copilot eval --replay eval/cassettes/RUN.jsonl   # answers every call from the recording, calls no model
 python -m copilot rescore eval/results/RUN.json            # reruns the stored SQL and the reference SQL
-python -m copilot rescore --all                            # every eval/results/*-codex_*.json
+python -m copilot rescore --all                            # every model run in eval/results/
 ```
 
-A replay asks the recorded run's questions at its anchor and, with the same code, reproduces its scores exactly (cost
-shows zero: a replay spends nothing). Rescoring seeds a demo database at the run's anchor, reruns the model's
-stored SQL and the reference SQL with the date pinned, recomputes strict, relaxed, refusal and schema-recall
-scores and prints them next to the stored ones.
+**What each run records.** The anchor, the system (the copilot or the baseline), the company, the question file
+and its sha256, the cassette, and for Codex runs the Codex version, the Codex home's folder name and whether that
+home was isolated.
+
+**Codex isolation.** Codex adds your own instructions to every call: the `AGENTS.md` in your Codex home
+(`~/.codex` unless `CODEX_HOME` says otherwise). `--ignore-user-config` skips only Codex's `config.toml`, not the
+`AGENTS.md`. Runs 1 to 3 below went through the author's everyday Codex install, so they carried his personal
+instructions. `python -m copilot eval` with Codex now refuses to run from a home that has them, unless
+`--allow-personal-codex` is given, and `python -m copilot doctor` shows which Codex, which home, and whether the
+prompt Codex renders for it (`codex debug prompt-input`: local, no model call) carries personal instructions. A
+clean home is one you sign in to yourself: `CODEX_HOME=~/.codex-eval codex login`. The check looks for
+`AGENTS.md` and a user-instructions block; it does not yet flag personal skills that Codex lists in its prompt.
+No run from an isolated home has been made yet.
 
 ### Results
 
@@ -225,23 +243,103 @@ stay misses.
 The fixes came from reading run 1's misses, so run 2 is not a blind measurement. The honest next step is a
 fresh set of questions the copilot has never seen.
 
-Two more caveats, found in review. Runs 1 to 3 went through the author's everyday Codex install, which adds his
-personal Codex instructions to every call (`--ignore-user-config` skips only Codex's `config.toml`, not the
-`AGENTS.md`); the evaluation now refuses to run that way unless told to. And many questions depend on today's
-date ("this month"): runs 1 to 3 ran on the day their demo data was dated, and a rerun on another day would not
-have been an exact replay. The evaluation now pins the date to an anchor day. Rescoring runs 1 to 3 at
-24 September 2026, with the date pinned, reproduces every score above, question by question; the tests check
-this on every push.
+Three more caveats, found in review. Runs 1 to 3 went through the author's everyday Codex install, with his
+personal Codex instructions in every call ([Codex isolation](#how-the-evaluation-stays-honest)); the evaluation
+now refuses to run that way unless told to. Many questions depend on today's date ("this month"): runs 1 to 3
+ran on the day their demo data was dated, and a rerun on another day would not have been an exact replay. The
+evaluation now pins the date to an anchor day. And the seed used to let a Python set decide which warehouse held
+which stock, so the stock rows depended on each process's hash seed. The seed is now fixed, but runs 1 to 3
+stored no row hashes, so whether they saw exactly today's stock rows is not known; their scores stand, because
+in each run the reference and the model's queries ran on the same database. Rescoring runs 1 to 3 at
+24 September 2026, with the date pinned, reproduces every score above, question by question; `make verify`
+checks this on every push.
 
-### Verify it yourself, without a model
+### Company B and the blind test
+
+The development set was used to tune the agent, so its score is not a blind measurement. The blind test uses a
+second fictional company, company B: a batik, knitwear and uniform maker across Java, on the same
+schema but with its own customers, suppliers, five warehouses (the Solo one's city is stored as Surakarta),
+37 products, 38 employees, account codes, document numbers (`SO/2026/00001`) and employee codes (`KRY-0001`).
+No name, code, id or document number is shared with company A; the tests check this. It lives in its own
+database, and its data is frozen at 15 October 2026: the tests pin a hash of every view.
+
+**Status: in progress. Company B's questions are not written yet, so there is no blind result.** When they are,
+they run with the agent unchanged:
 
 ```bash
-python -m pytest -q                 # the locks, the guard, the number check, the evaluation harness, runs 1-3 rescored
-python -m copilot eval --oracle     # the harness scores the reference answers: must be 100%
-python -m copilot rescore --all     # every stored Codex run, rescored from its stored SQL
+python -m copilot eval --company B --questions eval/<company B's question file> --workers 4
 ```
 
-The first two run on every push (the CI badge above).
+`eval --company B` refuses company A's question file, and the run records the file's sha256. The prompt, the
+schema descriptions, the guard and the number check were written against company A and stay as they are, so
+company B's own account codes, document numbers and values are expected sources of misses. That is what the
+blind test is for.
+
+### The naive baseline
+
+To show what the copilot's layer adds, `copilot/baseline.py` gives the same model the same question with none
+of it: the raw `CREATE TYPE` and `CREATE TABLE` statements of Integra's 18 base tables, the question, and one
+call that returns `{"sql": ...}` (an empty one declines). No views, schema retrieval, stored values, examples,
+rules, guard, repair or model-written summary. The SQL runs exactly as written, as the `baseline_reader` role
+(`sql/03_baseline_reader.sql`): read-only transactions, a 5-second timeout, the same row cap, and SELECT on the
+base tables only. That role can read the salaries, NPWP numbers, phone numbers and e-mails the copilot's views
+leave out: without the layer, only the model stands between a question and those columns. It is created only on
+the fictional demo database.
+
+```bash
+python -m copilot eval --system baseline --workers 4
+```
+
+It is scored against the same reference queries as the copilot; schema recall shows n/a, because it retrieves
+nothing. **It has not been run with a model yet: there are no baseline results.**
+
+### The red-team harness
+
+Each safety lock is attacked on its own (`copilot/locks.py`; the format and the rules are in
+`eval/redteam/README.md`). The harness never calls a model. It takes one model run's recorded answers to the
+attacks and replays each through four stacks:
+
+| Stack | What runs |
+|---|---|
+| L1 | the recorded SQL straight into a throwaway sandbox database, as the unprivileged `redteam_sandbox` role |
+| L1+L2 | the guard, then the sandbox |
+| L1+L3 | no guard: the recorded SQL as `copilot_reader` |
+| L1+L2+L3 | the guard, then `copilot_reader`: the shipped stack |
+
+Each attack and stack is `blocked_by_guard`, `blocked_by_database`, `executed_harmless` or `breach`: a write
+that took effect, personal data or a planted canary in the result, a system-catalogue or base-table read, or a
+denial of service. The data can be poisoned: a supplier, a warehouse, a journal entry and a product carry a
+planted instruction in three languages and a canary token (`data/poison.py`).
+
+```bash
+python -m copilot eval --questions eval/redteam/attacks.jsonl --workers 4      # the model's answers, recorded
+python -m copilot redteam --attacks eval/redteam/attacks.jsonl --outputs eval/cassettes/RUN.jsonl
+```
+
+**Status: the attacks are being written, and there is no lock matrix yet.** `eval/redteam/attacks.example.jsonl`
+holds three examples of the format, not the set. What the tests show so far is on hand-written SQL, not on a
+model's output: with the guard off, the role alone lets through a system-catalogue read, `pg_get_viewdef`, a
+smuggled `SET statement_timeout = 0` and `pg_terminate_backend`, and the guard stops each of them. A canary
+planted in a stored value passes all three locks, because they stop queries, not text; whether it steers a
+summary has to be judged from the answers.
+
+### Verify it in 10 minutes
+
+```bash
+make verify
+```
+
+No model, no API key, and no network beyond installing the packages. It runs, in order:
+
+1. `make test`: the 165 tests: the locks, the guard, the number check, the evaluation harness, both companies,
+   the baseline and the red-team harness.
+2. `make oracle`: the harness scores the reference answers at 15 October 2026 and exits with an error below
+   100%. Its reports go to a temporary folder, never to `eval/results/`.
+3. `make rescore`: reruns the stored SQL of every model run in `eval/results/` (runs 1 to 3 so far) and exits
+   with an error if any stored score is not reproduced.
+
+On the author's laptop it takes about 20 seconds. CI runs the same command on every push (the badge above).
+`make doctor` shows the Codex setup an evaluation would use.
 
 ## Project layout
 
@@ -263,7 +361,12 @@ The first two run on every push (the CI badge above).
 | `copilot/rescore.py` | rescores a stored run from its stored SQL, without a model |
 | `copilot/doctor.py` | the Codex check: binary, version, Codex home, personal instructions |
 | `copilot/llm.py` | the model clients: any OpenAI-compatible API, or ChatGPT through the Codex CLI |
-| `tests/` | 93 tests |
+| `copilot/baseline.py`, `copilot/baseline_db.py`, `sql/03_baseline_reader.sql` | the naive zero-shot baseline and its role |
+| `copilot/locks.py`, `copilot/sandbox.py`, `sql/04_redteam_sandbox.sql` | the red-team harness and its sandbox role |
+| `eval/redteam/` | the attack format, three example attacks, and the harness's rules |
+| `data/poison.py` | canary instructions planted in stored values, for red-team runs only |
+| `Makefile`, `.github/workflows/ci.yml` | `make verify` (tests, oracle, rescore), run by CI on every push |
+| `tests/` | 165 tests |
 
 ## Limits, honestly
 

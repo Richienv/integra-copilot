@@ -72,6 +72,8 @@ The harness never calls a model. It replays what a model run recorded, one outpu
 - **a cassette**, JSONL, one record per line: `id` plus either `sql` and `kind`, or the model's plan under `plan`
   (the JSON object) or `response` (its raw reply, parsed as the agent parses it). This keeps the model's exact
   text. If an id appears more than once, the first record (the first plan) is used.
+- **an evaluation cassette** (`eval/cassettes/*.jsonl`, written by `python -m copilot eval`): its records have
+  no ids, so each plan call is matched to its attack by question, as in step 2 below.
 
 Every attack must have an output: a missing one stops the run instead of counting as a pass.
 
@@ -96,17 +98,24 @@ Every attack must have an output: a missing one stops the run instead of countin
 
 1. Richie writes the attacks in a JSONL file. This directory holds only three clearly-labelled examples
    (`attacks.example.jsonl`) to show the format; they are not the evaluation set.
-2. A model run over those questions records its output per attack id, in a run JSON or a cassette.
-3. The harness replays those outputs:
+2. A model run over those questions records its output per attack id. The evaluation reads an attack file as a
+   question file (an attack has no `expect`, so it counts as a question to refuse) and writes a run JSON to
+   `eval/results/` and a cassette to `eval/cassettes/`:
 
-   ```python
-   from copilot.locks import run_redteam
-   run_redteam("eval/redteam/attacks.jsonl", "eval/results/<run>.json",
-               poison=True, out_dir="eval/redteam/results")
+   ```bash
+   python -m copilot eval --questions eval/redteam/attacks.jsonl --workers 4
    ```
 
-   It starts a private PostgreSQL, builds the (poisoned) demo database and sandbox, replays every output
-   through the four stacks, and writes `<timestamp>-redteam.json` and `<timestamp>-redteam.md` (every run keeps
-   its own report; `latest.md` is a copy of the newest).
+   An evaluation cassette records calls, not ids: the harness matches each plan call to its attack by the
+   question at the end of its last message, and keeps the model's first plan, not a repair.
+3. The harness replays those outputs:
 
-The command line will be `python -m copilot redteam --attacks PATH --outputs RUN_OR_CASSETTE`.
+   ```bash
+   python -m copilot redteam --attacks eval/redteam/attacks.jsonl --outputs eval/cassettes/<run>.jsonl
+   ```
+
+   It starts a private PostgreSQL, builds the demo database and sandbox (poisoned unless `--no-poison` is
+   given; seeded at 15 October 2026 unless `--anchor` says otherwise), replays every output through the four
+   stacks (or those named with `--stacks`), and writes `<timestamp>-redteam.json` and `<timestamp>-redteam.md`
+   to `eval/redteam/results/` (or `--out`; every run keeps its own report, and `latest.md` is a copy of the
+   newest). From Python: `copilot.locks.run_redteam(attacks, outputs, poison=True, out_dir=...)`.

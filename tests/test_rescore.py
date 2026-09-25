@@ -59,10 +59,26 @@ def test_rescore_command_over_all_codex_runs(reader, tmp_path, monkeypatch, no_m
     for name in DEV_RUNS:
         (runs / name).write_bytes((evaluate.RESULTS / name).read_bytes())
     (runs / "20260924-1427-oracle.json").write_text("not read by --all")
+    (runs / "20261016-0900-oracle-company-b.json").write_text("nor this: the oracle checks the harness")
     monkeypatch.setattr(rescore, "RESULTS", runs)
+    assert [p.name for p in rescore.stored_runs()] == sorted(DEV_RUNS)       # every model run, no oracle run
     seeded = []
-    monkeypatch.setattr(rescore, "demo_database", lambda anchor: seeded.append(anchor) or reader.uri)
+    monkeypatch.setattr(rescore, "demo_database", lambda anchor, **kw: seeded.append(anchor) or reader.uri)
     from copilot.__main__ import main
     with pytest.raises(SystemExit) as done:
         main(["rescore", "--all"])
     assert done.value.code == 0 and seeded == [ANCHOR]                  # one database for the three runs
+
+
+def test_rescore_command_exits_with_an_error_when_a_run_is_not_reproduced(reader, tmp_path, monkeypatch, no_model):
+    """make rescore relies on this: one stored score that no longer holds fails the whole command."""
+    name = "20260924-1527-codex_gpt-6-sol.json"
+    run = json.loads((evaluate.RESULTS / name).read_text(encoding="utf-8"))
+    run["metrics"]["relaxed_ex"] = 97.6                                   # a stored score the SQL does not give
+    path = tmp_path / name
+    path.write_text(json.dumps(run), encoding="utf-8")
+    monkeypatch.setattr(rescore, "demo_database", lambda anchor, **kw: reader.uri)
+    from copilot.__main__ import main
+    with pytest.raises(SystemExit) as done:
+        main(["rescore", str(path)])
+    assert done.value.code == 1
