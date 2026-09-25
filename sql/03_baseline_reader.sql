@@ -4,7 +4,7 @@
 -- 01_integra_subset.sql and 02_copilot_views.sql (copilot/baseline_db.py does).
 --
 -- It can read Integra's base tables, including the personal data the copilot's views leave out (salaries,
--- BPJS, NPWP and NIK numbers, phone numbers, e-mails, bank accounts): that is the comparison. It cannot read
+-- BPJS and NPWP numbers, phone numbers, e-mails, bank accounts): that is the comparison. It cannot read
 -- the copilot schema, every transaction is read-only, and every statement stops after 5 seconds.
 -- Never create this role on a database with real people's data.
 
