@@ -3,12 +3,14 @@
 Attacks replayed without the read-only role (stacks L1 and L1+L2) run here, as the role redteam_sandbox:
 a login role that is NOSUPERUSER, NOCREATEDB, NOCREATEROLE and not a member of pg_execute_server_program,
 pg_read_server_files, pg_write_server_files or pg_signal_backend. Before executing anything, assert_safe_role
-checks the connected role is not a superuser and has none of those memberships, and refuses otherwise, so
-nothing replayed ever runs as the postgres superuser.
+checks the connected role has none of those powers, and refuses otherwise, so nothing replayed ever runs as
+the postgres superuser.
 
-The database is throwaway: redteam_sandbox owns its data, so an unguarded write really takes effect (and is
-rolled back by the harness after it is classified). It can be loaded with poisoned demo data (canary strings
-in stored values) for the indirect-injection attacks.
+The database is throwaway: redteam_sandbox owns its data, so an unguarded write really takes effect, inside a
+transaction the harness rolls back after the result is captured. A statement that ends that transaction itself
+(a smuggled COMMIT) makes its writes stick; the sandbox notices, and the harness rebuilds the database from the
+same rows before the next attack. It can be loaded with poisoned demo data (canary strings in stored values)
+for the indirect-injection attacks.
 """
 import sys
 import time
@@ -16,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
+from psycopg import pq
 from psycopg.conninfo import make_conninfo
 
 from .db import _json_value
@@ -34,14 +37,20 @@ class SandboxError(RuntimeError):
 
 
 def assert_safe_role(conn):
-    """Refuse if the connected role is a superuser or a member of a privileged built-in role."""
-    if conn.execute("select current_setting('is_superuser')").fetchone()[0] == "on":
-        raise SandboxError(f"refusing to run: {conn.execute('select current_user').fetchone()[0]} is a superuser")
+    """Refuse if the connected role is a superuser, can create databases or roles, or is a member of a
+    privileged built-in role."""
+    user, superuser, createdb, createrole = conn.execute(
+        "select current_user, rolsuper, rolcreatedb, rolcreaterole from pg_roles where rolname = current_user"
+    ).fetchone()
+    if superuser or conn.execute("select current_setting('is_superuser')").fetchone()[0] == "on":
+        raise SandboxError(f"refusing to run: {user} is a superuser")
+    if createdb or createrole:
+        raise SandboxError(f"refusing to run: {user} can create databases or roles")
     bad = conn.execute("select rolname from pg_roles where rolname = any(%s) "
                        "and pg_has_role(current_user, oid, 'MEMBER')",
                        (list(DANGEROUS_ROLES),)).fetchall()
     if bad:
-        raise SandboxError(f"refusing to run: current role is a member of {[b[0] for b in bad]}")
+        raise SandboxError(f"refusing to run: {user} is a member of {[b[0] for b in bad]}")
 
 
 @dataclass
@@ -51,17 +60,20 @@ class SandboxResult:
     truncated: bool = False
     ms: float = 0.0
     error: str = ""
-    status: str = ""            # the command tag, e.g. "DELETE 5" or "SELECT 10"
+    status: str = ""            # every statement's command tag, e.g. "SELECT 1; COMMIT; DELETE 572"
+    persisted: bool = False     # the statement ended the harness transaction, so what it wrote was committed
 
 
 @dataclass
 class Sandbox:
     """Runs one recorded statement in the throwaway database and rolls it back, so writes are observed but
     do not persist. It is not read-only: that is deliberate, so the matrix can show an unguarded write
-    taking effect."""
+    taking effect. Like the copilot's own reader, it returns the first result set."""
     uri: str
     max_rows: int = 200
     timeout_ms: int = 5000
+    rebuild: object = field(default=None, repr=False)      # recreates the database; set by create_sandbox
+    dirty: bool = False                                     # a statement committed itself; reset() before reuse
     _conn: object = field(default=None, repr=False)
 
     def _connection(self):
@@ -75,30 +87,51 @@ class Sandbox:
         conn.rollback()
         return u
 
+    def reset(self):
+        """Rebuild the throwaway database from the same rows after a statement made its writes stick."""
+        if self._conn is not None:
+            self._conn.close()
+        if self.rebuild is None:
+            raise SandboxError("the sandbox is dirty and has no rebuild function")
+        self.rebuild()
+        self.dirty = False
+
     def run(self, sql):
         """Run one recorded statement, capture its result, then roll back. Returns a SandboxResult."""
+        if self.dirty:
+            self.reset()
         conn = self._connection()
         assert_safe_role(conn)
         start = time.perf_counter()
+        error, columns, fetched, tags = "", [], [], []
         try:
             with conn.cursor() as cur:
                 cur.execute(f"set local statement_timeout = {int(self.timeout_ms)}")
                 cur.execute("set local search_path = copilot")
                 cur.execute(sql)
-                status = cur.statusmessage or ""
                 columns = [d.name for d in cur.description] if cur.description else []
                 fetched = cur.fetchmany(self.max_rows + 1) if cur.description else []
-            conn.rollback()
+                tags.append(cur.statusmessage or "")
+                while cur.nextset():
+                    tags.append(cur.statusmessage or "")
         except psycopg.Error as e:
+            error = (e.diag.message_primary or str(e)).strip()
+        persisted = conn.info.transaction_status == pq.TransactionStatus.IDLE
+        try:
             conn.rollback()
-            return SandboxResult(ms=(time.perf_counter() - start) * 1000,
-                                 error=(e.diag.message_primary or str(e)).strip())
+        except psycopg.Error:           # the statement killed its own connection; the next run reconnects
+            conn.close()
+        self.dirty = self.dirty or persisted
+        ms = (time.perf_counter() - start) * 1000
+        if error:
+            return SandboxResult(ms=ms, error=error, persisted=persisted)
         rows = [[_json_value(v) for v in r] for r in fetched[: self.max_rows]]
-        return SandboxResult(columns, rows, truncated=len(fetched) > self.max_rows,
-                             ms=(time.perf_counter() - start) * 1000, status=status)
+        return SandboxResult(columns, rows, truncated=len(fetched) > self.max_rows, ms=ms,
+                             status="; ".join(t for t in tags if t), persisted=persisted)
 
 
-def _generate(anchor, poison):
+def demo_tables(anchor=None, poison=False):
+    """The demo rows from data.seed, with the canaries of data.poison planted when poison is set."""
     sys.path.insert(0, str(ROOT))
     from data.seed import generate
     tables = generate(anchor)
@@ -108,25 +141,30 @@ def _generate(anchor, poison):
     return tables
 
 
-def create_sandbox(admin_uri, poison=True, anchor=None, dbname=SANDBOX_DB, fresh=True):
-    """Create (or rebuild) the throwaway database and return a Sandbox connected to it as redteam_sandbox.
+def load_demo(admin_uri, tables):
+    """Build a demo database from the given rows: like db.create_demo, but the rows may be poisoned.
+    Only for a red-team run's own server; normal evaluation uses db.create_demo."""
+    from data.seed import load
+    with psycopg.connect(admin_uri, autocommit=True) as conn:
+        conn.execute((SQL_DIR / "01_integra_subset.sql").read_text())
+        load(conn, tables)
+        conn.execute((SQL_DIR / "02_copilot_views.sql").read_text())
+
+
+def _build(admin_uri, tables, dbname):
+    """Drop and recreate the throwaway database, load it as redteam_sandbox, then add the copilot views.
 
     Data is loaded as redteam_sandbox so it owns the tables; the copilot views and reader role are created
     by the admin (creating a role needs a privilege redteam_sandbox does not have).
     """
     from data.seed import load
-    tables = _generate(anchor, poison)
-
     with psycopg.connect(admin_uri, autocommit=True) as conn:
         conn.execute((SQL_DIR / "04_redteam_sandbox.sql").read_text())
-        exists = conn.execute("select 1 from pg_database where datname = %s", (dbname,)).fetchone()
-        if exists and fresh:
+        if conn.execute("select 1 from pg_database where datname = %s", (dbname,)).fetchone():
             conn.execute("select pg_terminate_backend(pid) from pg_stat_activity "
                          "where datname = %s and pid <> pg_backend_pid()", (dbname,))
             conn.execute(f'drop database "{dbname}"')
-            exists = None
-        if not exists:
-            conn.execute(f'create database "{dbname}" owner {SANDBOX_ROLE}')
+        conn.execute(f'create database "{dbname}" owner {SANDBOX_ROLE}')
 
     admin_db_uri = make_conninfo(admin_uri, dbname=dbname)
     with psycopg.connect(admin_db_uri, autocommit=True) as conn:
@@ -134,13 +172,18 @@ def create_sandbox(admin_uri, poison=True, anchor=None, dbname=SANDBOX_DB, fresh
 
     sandbox_uri = make_conninfo(admin_uri, user=SANDBOX_ROLE, dbname=dbname)
     with psycopg.connect(sandbox_uri, autocommit=True) as conn:
-        if not conn.execute("select to_regclass('public.invoices') is not null").fetchone()[0]:
-            conn.execute((SQL_DIR / "01_integra_subset.sql").read_text())
-            load(conn, tables)
+        assert_safe_role(conn)
+        conn.execute((SQL_DIR / "01_integra_subset.sql").read_text())
+        load(conn, tables)
 
     with psycopg.connect(admin_db_uri, autocommit=True) as conn:
         conn.execute((SQL_DIR / "02_copilot_views.sql").read_text())
         conn.execute(f"grant usage on schema copilot to {SANDBOX_ROLE}")
         conn.execute(f"grant select on all tables in schema copilot to {SANDBOX_ROLE}")
+    return sandbox_uri
 
-    return Sandbox(sandbox_uri)
+
+def create_sandbox(admin_uri, poison=True, anchor=None, dbname=SANDBOX_DB):
+    """Create (or rebuild) the throwaway database and return a Sandbox connected to it as redteam_sandbox."""
+    tables = demo_tables(anchor, poison)
+    return Sandbox(_build(admin_uri, tables, dbname), rebuild=lambda: _build(admin_uri, tables, dbname))
