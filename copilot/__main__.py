@@ -7,8 +7,14 @@
     python -m copilot mcp                MCP server over stdio
     python -m copilot eval               run the evaluation set (needs a model; --workers 4 runs four at once)
     python -m copilot eval --oracle      check the harness itself, no model needed
+    python -m copilot eval --anchor 2026-09-24          seed the data and pin today's date to another day
+    python -m copilot eval --replay eval/cassettes/RUN.jsonl   rerun from recorded model calls, no model needed
+    python -m copilot rescore eval/results/RUN.json     recompute a stored run's scores, no model (--all: every codex run)
+    python -m copilot check-gold --anchor 2026-09-24    are all reference answers non-empty at that day?
+    python -m copilot doctor             the Codex setup: binary, version, CODEX_HOME, personal instructions
 """
 import argparse
+import datetime as dt
 import json
 import sys
 
@@ -34,6 +40,13 @@ def main(argv=None):
     sub.add_parser("mcp")
     e = sub.add_parser("eval"); e.add_argument("--oracle", action="store_true"); e.add_argument("--limit", type=int)
     e.add_argument("--ids", nargs="*"); e.add_argument("--workers", type=int, default=1)
+    e.add_argument("--anchor", type=dt.date.fromisoformat, help="YYYY-MM-DD; default 2026-10-15")
+    e.add_argument("--replay", help="a cassette: answer every model call from it")
+    e.add_argument("--allow-personal-codex", action="store_true",
+                   help="run with a Codex home that carries personal instructions (AGENTS.md)")
+    r = sub.add_parser("rescore"); r.add_argument("runs", nargs="*"); r.add_argument("--all", action="store_true")
+    g = sub.add_parser("check-gold"); g.add_argument("--anchor", type=dt.date.fromisoformat)
+    sub.add_parser("doctor")
     args = p.parse_args(argv)
 
     if args.cmd == "init-db":
@@ -71,7 +84,24 @@ def main(argv=None):
         mcp.run()
     elif args.cmd == "eval":
         from .evaluate import main as run_eval
-        run_eval(oracle=args.oracle, limit=args.limit, ids=args.ids, workers=args.workers)
+        run_eval(oracle=args.oracle, limit=args.limit, ids=args.ids, workers=args.workers, anchor=args.anchor,
+                 replay=args.replay, allow_personal_codex=args.allow_personal_codex)
+    elif args.cmd == "rescore":
+        from .rescore import main as run_rescore
+        sys.exit(0 if run_rescore(args.runs, all_runs=args.all) else 1)
+    elif args.cmd == "check-gold":
+        from . import db
+        from .evaluate import DEFAULT_ANCHOR, GoldError, demo_database, load_questions, validate_gold
+        anchor = args.anchor or DEFAULT_ANCHOR
+        qs = load_questions()
+        try:
+            gold = validate_gold(db.ReadOnlyDB(demo_database(anchor)), qs, anchor)
+        except GoldError as err:
+            sys.exit(str(err))
+        print(f"All {len(gold)} reference answers have rows with values at anchor {anchor}.")
+    elif args.cmd == "doctor":
+        from .doctor import main as run_doctor
+        run_doctor()
 
 
 if __name__ == "__main__":
