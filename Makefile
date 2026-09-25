@@ -11,7 +11,8 @@ test:
 # The harness scores the reference answers at the pinned anchor. Below 100% it exits with an error.
 # Its reports go to a temporary folder: eval/results is never touched.
 oracle:
-	$(PYTHON) -m copilot eval --oracle --anchor $(ANCHOR) --workers 4 --out "$$(mktemp -d)"
+	@out=$$(mktemp -d) && $(PYTHON) -m copilot eval --oracle --anchor $(ANCHOR) --workers 4 --out "$$out"; \
+	status=$$?; rm -rf "$$out"; exit $$status
 
 # Every stored model run, recomputed from its stored SQL. Any difference exits with an error.
 rescore:

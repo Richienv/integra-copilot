@@ -12,8 +12,10 @@
 
     export LLM_BACKEND=codex  CODEX_MODEL=gpt-6-sol   # or: no key set and the ChatGPT app installed
 """
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -113,6 +115,18 @@ def parse_codex_events(stdout):
     return text, out_tokens
 
 
+_WORKDIR = None
+
+
+def _empty_workdir():
+    """One empty folder per process for Codex to run in, removed when the process exits."""
+    global _WORKDIR
+    if _WORKDIR is None or not os.path.isdir(_WORKDIR):
+        _WORKDIR = tempfile.mkdtemp(prefix="copilot-codex-")
+        atexit.register(shutil.rmtree, _WORKDIR, ignore_errors=True)
+    return _WORKDIR
+
+
 class CodexModel:
     """Each call runs `codex exec` once, signed in with ChatGPT: no API key, billed to the ChatGPT plan.
 
@@ -138,7 +152,7 @@ class CodexModel:
                      "Token counts are estimates of the Copilot's own prompts; Codex adds about 21,000 tokens of its "
                      "own instructions to every call. Cost is zero because calls are billed to the ChatGPT plan.")
         self.timeout = timeout
-        self.workdir = tempfile.mkdtemp(prefix="copilot-codex-")     # empty: nothing for the agent to read
+        self.workdir = _empty_workdir()                             # empty: nothing for the agent to read
         self.price_in = float(os.environ.get("LLM_PRICE_IN") or 0)
         self.price_out = float(os.environ.get("LLM_PRICE_OUT") or 0)
 
