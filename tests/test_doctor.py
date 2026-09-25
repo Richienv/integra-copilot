@@ -108,4 +108,4 @@ def test_doctor_command(codex, capsys):
     assert "codex version      9.9.9-test" in out and "AGENTS.md in home  none" in out
     assert "isolation          isolated" in out
     # the login command names the binary the copilot uses, not whatever `codex` is on the PATH
-    assert f'clean home         CODEX_HOME=~/.codex-eval "{codex / "codex"}" login' in out
+    assert f'clean home         mkdir -p ~/.codex-eval && CODEX_HOME=~/.codex-eval "{codex / "codex"}" login' in out

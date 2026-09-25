@@ -7,6 +7,7 @@ given. To set up an isolated home, sign in to it yourself (auth files are never 
 copilot uses: the one inside the ChatGPT app, not necessarily the `codex` on your PATH. `doctor` prints this
 command for the binary it found:
 
+    mkdir -p ~/.codex-eval     # Codex refuses a CODEX_HOME that does not exist yet
     CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login
     CODEX_HOME=~/.codex-eval python -m copilot doctor      # isolation: isolated
     CODEX_HOME=~/.codex-eval python -m copilot eval --workers 4
@@ -28,7 +29,7 @@ USER_BLOCKS = ("# AGENTS.md instructions", "<INSTRUCTIONS>", "<user_instructions
 
 def login_command(binary):
     """The command that signs a separate, clean Codex home in with the binary the copilot uses."""
-    return f'CODEX_HOME=~/.codex-eval "{binary}" login' if binary else None
+    return f'mkdir -p ~/.codex-eval && CODEX_HOME=~/.codex-eval "{binary}" login' if binary else None
 
 
 def codex_home(env=None):

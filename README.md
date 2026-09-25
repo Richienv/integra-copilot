@@ -117,6 +117,7 @@ the exact login command for the binary the copilot uses:
 ```bash
 python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan?"
 python -m copilot doctor                                  # which Codex, which Codex home, personal instructions or not
+mkdir -p ~/.codex-eval                                                                # Codex needs the folder to exist
 CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login    # once, signed in by you
 CODEX_HOME=~/.codex-eval CODEX_MODEL=gpt-6-sol CODEX_EFFORT=low python -m copilot eval --workers 4
 ```
@@ -238,7 +239,7 @@ instructions. `python -m copilot eval` with Codex now refuses to run from a home
 `--allow-personal-codex` is given, and `python -m copilot doctor` shows which Codex, which home, and whether the
 prompt Codex renders for it (`codex debug prompt-input`: local, no model call) carries personal instructions. A
 clean home is one you sign in to yourself, with the Codex the copilot uses:
-`CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login` (`doctor` prints this
+`mkdir -p ~/.codex-eval && CODEX_HOME=~/.codex-eval /Applications/ChatGPT.app/Contents/Resources/codex login` (`doctor` prints this
 command for the binary it found). The check looks for `AGENTS.md` and a user-instructions block; it does not yet
 flag personal skills that Codex lists in its prompt. Isolation does not remove the real date Codex may give the
 model (see Pinned dates). No run from an isolated home has been made yet.
