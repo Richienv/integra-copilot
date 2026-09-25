@@ -15,6 +15,7 @@ from pathlib import Path
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.sql import SQL, Identifier
 
 ROOT = Path(__file__).resolve().parent.parent
 SQL_DIR = ROOT / "sql"
@@ -44,16 +45,43 @@ def reader_uri(admin_uri):
     return make_conninfo(admin_uri, user="copilot_reader")
 
 
-def create_demo(admin_uri, anchor=None):
-    """Create Integra's tables, load demo data, then create the copilot views and reader role."""
+def _seed(company):
+    """data/seed.py, after checking that it knows the demo company."""
     import sys
     sys.path.insert(0, str(ROOT))
-    from data.seed import generate, load
+    from data import seed
+    if company not in seed.COMPANIES:
+        raise ValueError(f"Unknown demo company {company!r}; choose one of {', '.join(seed.COMPANIES)}.")
+    return seed
+
+
+def database(admin_uri, name):
+    """The admin URI of database `name` on the same server, created if it is missing."""
+    with psycopg.connect(admin_uri, autocommit=True) as conn:
+        if not conn.execute("select 1 from pg_database where datname = %s", (name,)).fetchone():
+            conn.execute(SQL("create database {}").format(Identifier(name)))
+    return make_conninfo(admin_uri, dbname=name)
+
+
+def demo_database(admin_uri, company="A"):
+    """Where a demo company lives on the local server: company A in the default database, as always, and any
+    other company in a database of its own."""
+    _seed(company)
+    return admin_uri if company == "A" else database(admin_uri, f"company_{company.lower()}")
+
+
+def create_demo(admin_uri, anchor=None, company="A"):
+    """Create Integra's tables, load one demo company ("A" or "B"), then create the copilot views and reader
+    role. One company per database: a database that already holds other data is refused."""
+    seed = _seed(company)
     with psycopg.connect(admin_uri, autocommit=True) as conn:
         exists = conn.execute("select to_regclass('public.invoices') is not null").fetchone()[0]
         if not exists:
             conn.execute((SQL_DIR / "01_integra_subset.sql").read_text())
-            load(conn, generate(anchor))
+            seed.load(conn, seed.generate(anchor, company=company))
+        elif not conn.execute("select 1 from public.warehouses where code = %s",
+                              (seed.COMPANIES[company]["warehouses"][0][0],)).fetchone():
+            raise ValueError(f"This database already holds other data; company {company} needs its own database.")
         conn.execute((SQL_DIR / "02_copilot_views.sql").read_text())
         return not exists
 

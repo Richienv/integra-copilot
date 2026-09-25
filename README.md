@@ -91,6 +91,10 @@ python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini, per pelanggan
 python -m copilot serve                     # web page on http://127.0.0.1:8000
 ```
 
+A second fictional company, kept for a blind test, makes batik, knitwear and uniforms in Central and East Java.
+`python -m copilot init-db --company B` builds it in its own database, and `COPILOT_COMPANY=B` makes the other
+commands use it.
+
 Without any model, `python -m copilot sql "select ..."`, the SQL console on the web page and the MCP tools
 still work.
 
@@ -245,7 +249,7 @@ The first two run on every push (the CI badge above).
 |---|---|
 | `sql/01_integra_subset.sql` | the part of Integra's schema the copilot reads, names identical to Integra |
 | `sql/02_copilot_views.sql` | the view layer and the read-only role |
-| `data/seed.py` | deterministic fictional data, dated relative to an anchor day; books balance |
+| `data/seed.py` | deterministic fictional data for two companies (A, and B for the blind test), dated relative to an anchor day; books balance |
 | `copilot/semantic.py` | what each view means, in three languages; schema retrieval |
 | `copilot/guard.py` | the SQL guard |
 | `copilot/agent.py` | the loop: plan, guard, execute, repair, summary |
