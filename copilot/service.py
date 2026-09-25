@@ -3,6 +3,7 @@
 COPILOT_DATABASE_URL  the copilot_reader connection to a real Integra database (optional).
                       Without it, a private local PostgreSQL is started in ~/.cache/integra-copilot/pg
                       (or COPILOT_DATA_DIR) with demo data.
+COPILOT_COMPANY       which demo company: A (the default) or B, each in its own database on that server.
 LLM_BASE_URL, LLM_API_KEY, LLM_MODEL   any OpenAI-compatible API.
 LLM_BACKEND=codex     ChatGPT through the Codex CLI instead: the default when no key is set and the ChatGPT
                       app is installed. Without any model, /api/sql and the MCP tools still work;
@@ -19,12 +20,13 @@ from .tax import TaxIndex
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def reader_from_env(data_dir=None, anchor=None):
+def reader_from_env(data_dir=None, anchor=None, company=None):
     url = os.environ.get("COPILOT_DATABASE_URL")
     if url:
         return db.ReadOnlyDB(url)
-    admin = db.local_server(data_dir)
-    db.create_demo(admin, anchor)
+    company = (company or os.environ.get("COPILOT_COMPANY") or "A").upper()
+    admin = db.demo_database(db.local_server(data_dir), company)
+    db.create_demo(admin, anchor, company)
     return db.ReadOnlyDB(db.reader_uri(admin))
 
 

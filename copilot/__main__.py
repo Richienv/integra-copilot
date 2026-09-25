@@ -1,6 +1,8 @@
 """Command line.
 
     python -m copilot init-db            create the local demo database (~/.cache/integra-copilot/pg)
+    python -m copilot init-db --company B   the second demo company, in its own database;
+                                            other commands use it with COPILOT_COMPANY=B
     python -m copilot ask "Berapa piutang yang jatuh tempo minggu ini?"
     python -m copilot sql "select name, balance from gl_accounts"
     python -m copilot serve              web page + API on http://127.0.0.1:8000
@@ -27,7 +29,7 @@ def _table(columns, rows, limit=20):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="python -m copilot")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init-db")
+    i = sub.add_parser("init-db"); i.add_argument("--company", type=str.upper, choices=["A", "B"])
     a = sub.add_parser("ask"); a.add_argument("question"); a.add_argument("--json", action="store_true")
     s = sub.add_parser("sql"); s.add_argument("sql")
     v = sub.add_parser("serve"); v.add_argument("--port", type=int, default=8000); v.add_argument("--host", default="127.0.0.1")
@@ -37,9 +39,10 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if args.cmd == "init-db":
+        from psycopg.conninfo import conninfo_to_dict
         from .service import reader_from_env
-        r = reader_from_env()
-        print("demo database ready; reader role:", r.user())
+        r = reader_from_env(company=args.company)
+        print(f"demo database ready: {conninfo_to_dict(r.uri).get('dbname')}; reader role: {r.user()}")
     elif args.cmd == "ask":
         from .service import build
         _, copilot, _ = build()
